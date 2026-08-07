@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request
 from flask_compress import Compress
 from flask_cors import CORS
 
-from .config import Config
+from ..config import Config
 
 
 def create_app(config_class: type = Config) -> Flask:
@@ -16,34 +16,26 @@ def create_app(config_class: type = Config) -> Flask:
     # (CORS_ORIGINS env), defaulting to local dev.
     CORS(app, resources={r"/*": {"origins": app.config["CORS_ORIGINS"]}}, supports_credentials=True)
 
-    from .blueprints.health import bp as health_bp
+    from .blueprints.core import bp as core_bp
     from .blueprints.auth import bp as auth_bp
     from .blueprints.cases import bp as cases_bp
     from .blueprints.items import case_bp as case_items_bp, lib_bp as items_lib_bp
     from .blueprints.recommendations import bp as recs_bp
     from .blueprints.documents import bp as documents_bp
-    from .blueprints.alerts import bp as alerts_bp
-    from .blueprints.ml import bp as ml_bp
-    from .blueprints.terms import bp as terms_bp
+    from .blueprints.notifications import bp as notifications_bp
+    #from .blueprints.ml import bp as ml_bp
     from .blueprints.me import bp as me_bp
-    from .blueprints.communications import bp as communications_bp
-    from .blueprints.ale import bp as ale_bp
-    from .blueprints.meta import bp as meta_bp
 
-    app.register_blueprint(health_bp)
+    app.register_blueprint(core_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(cases_bp)
     app.register_blueprint(case_items_bp)
     app.register_blueprint(items_lib_bp)
     app.register_blueprint(recs_bp)
     app.register_blueprint(documents_bp)
-    app.register_blueprint(alerts_bp)
-    app.register_blueprint(ml_bp)
-    app.register_blueprint(terms_bp)
+    #app.register_blueprint(ml_bp)
     app.register_blueprint(me_bp)
-    app.register_blueprint(communications_bp)
-    app.register_blueprint(ale_bp)
-    app.register_blueprint(meta_bp)
+    app.register_blueprint(notifications_bp)
 
     from .commands import register_commands
 
@@ -76,7 +68,7 @@ def create_app(config_class: type = Config) -> Flask:
     # A Gemini outage that survives retries surfaces as ModelOverloaded. Map it
     # to 503 everywhere, so document analysis and program scraping degrade the
     # same friendly way the photo scan already does, instead of an opaque 500.
-    from .services.gemini_client import ModelOverloaded
+    from .services.gemini import ModelOverloaded
 
     @app.errorhandler(ModelOverloaded)
     def _model_overloaded(e):

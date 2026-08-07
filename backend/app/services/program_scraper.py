@@ -26,7 +26,7 @@ from typing import Literal, Optional
 import requests
 from pydantic import BaseModel
 
-from .gemini_client import generate_with_retry
+from .gemini import generate_with_retry
 
 # Resource types accepted by the catalog (mirrors the resources.type CHECK).
 _RESOURCE_TYPES = (
@@ -205,7 +205,7 @@ def _extract_programs(page_text: str, case_ctx: dict, api_key: str) -> list[Scra
     from google import genai
     from google.genai import types
 
-    from .gemini_schema import to_gemini_schema
+    from .gemini import to_gemini_schema
 
     prompt = _PROMPT.format(
         disaster=case_ctx.get("disaster_type") or "a disaster",
