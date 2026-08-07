@@ -10,3 +10,4 @@ __pycache__/
 instance/
 *.db
 .pytest_cache/
+changes.txt
