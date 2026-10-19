@@ -3,6 +3,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api";
 import { useCases } from "../lib/CasesContext";
+import { Field } from "../components/forms/Field";
+import { MissingList, MissingItem } from "../components/forms/MissingList";
+import { PasswordChecklist } from "../components/forms/PasswordChecklist";
+import { unmetPasswordRules, validateEmail } from "../lib/validation";
 
 type Mode = "signin" | "signup" | "magic" | "reset";
 
@@ -20,7 +24,7 @@ function friendlyAuthError(raw: string): string {
     return "There's already an account with this email. Try signing in instead, or reset your password if you've forgotten it.";
   }
   if (lower.includes("password should be")) {
-    return "Please choose a password of at least 6 characters.";
+    return "Please choose a stronger password. Use at least 8 characters with a capital letter, a lowercase letter, and a number.";
   }
   if (lower.includes("rate limit") || lower.includes("too many")) {
     return "Too many attempts in a short time. Take a breath and try again in a minute.";
@@ -57,11 +61,13 @@ export default function Login() {
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
 
   function switchMode(next: Mode) {
     setMode(next);
     setErr(null);
     setInfo(null);
+    setAttempted(false);
   }
 
   async function routeAfterAuth() {
@@ -82,14 +88,27 @@ export default function Login() {
     }
   }
 
+  const needsPassword = mode === "signin" || mode === "signup";
+  const missing: MissingItem[] = [];
+  const emailErr = validateEmail(email);
+  if (emailErr) missing.push({ id: "login-email", message: email.trim() ? "Fix your email address" : "Enter your email address" });
+  if (needsPassword) {
+    if (mode === "signup") {
+      const unmet = unmetPasswordRules(password);
+      if (unmet.length) missing.push({ id: "login-password", message: `Password still needs: ${unmet.map((r) => r.label.toLowerCase()).join(", ")}` });
+    } else if (!password) {
+      missing.push({ id: "login-password", message: "Enter your password" });
+    }
+  }
+  if (mode === "signup" && !agree) missing.push({ id: "agree", message: "Tick the box to agree to the Terms and Privacy Policy" });
+  const canSubmit = missing.length === 0;
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setInfo(null);
-    if (mode === "signup" && !agree) {
-      setErr("Please agree to the Terms and Privacy Policy.");
-      return;
-    }
+    setAttempted(true);
+    if (!canSubmit) return;
     setBusy(true);
     try {
       if (mode === "signin") {
@@ -123,52 +142,48 @@ export default function Login() {
     }
   }
 
-  const needsPassword = mode === "signin" || mode === "signup";
-
   return (
     <div className="container" style={{ maxWidth: 460 }}>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>{TITLES[mode]}</h2>
         <p className="warm-note" style={{ marginTop: 0 }}>{NOTES[mode]}</p>
         <form onSubmit={submit}>
-          <label htmlFor="login-email">Email</label>
-          <input
+          <Field
             id="login-email"
+            label="Email"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            inputMode="email"
             autoComplete="email"
             required
+            value={email}
+            onChange={setEmail}
+            validate={validateEmail}
+            forceShowError={attempted}
           />
           {needsPassword && (
-            <>
-              <label htmlFor="login-password">Password</label>
-              <div className="password-wrap">
-                <input
-                  id="login-password"
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                  minLength={mode === "signup" ? 6 : undefined}
-                  required
-                />
+            <Field
+              id="login-password"
+              label="Password"
+              type={showPassword ? "text" : "password"}
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              required
+              value={password}
+              onChange={setPassword}
+              validate={mode === "signup" ? (v) => (unmetPasswordRules(v).length ? "Your password doesn't meet every requirement yet." : null) : (v) => (v ? null : "Enter your password.")}
+              forceShowError={attempted}
+              trailing={
                 <button
                   type="button"
                   className="ghost password-toggle"
                   onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
                 >
-                  {showPassword ? "Hide" : "Show"}
+                  {showPassword ? "Hide password" : "Show password"}
                 </button>
-              </div>
-              {mode === "signup" && (
-                <p className="muted-strong" style={{ fontSize: 13, margin: "6px 0 0" }}>
-                  At least 6 characters. Pick something you'll remember, you can
-                  always reset it later.
-                </p>
-              )}
-            </>
+              }
+            >
+              {mode === "signup" && <PasswordChecklist id="pw-checklist" password={password} />}
+            </Field>
           )}
 
           {mode === "signup" && (
@@ -176,6 +191,8 @@ export default function Login() {
               <input
                 id="agree"
                 type="checkbox"
+                required
+                aria-required="true"
                 checked={agree}
                 onChange={(e) => setAgree(e.target.checked)}
               />
@@ -187,17 +204,18 @@ export default function Login() {
             </div>
           )}
 
-          {err && <div className="error">{err}</div>}
+          <MissingList items={missing} id="login-missing" />
+          {err && <div className="error" role="alert">{err}</div>}
           {info && <div className="notice" style={{ marginTop: 12 }}>{info}</div>}
 
           <div className="row" style={{ marginTop: 16 }}>
-            <button type="submit" disabled={busy} className="big">
+            <button type="submit" disabled={busy || !canSubmit} aria-describedby={canSubmit ? undefined : "login-missing"} className="big">
               {busy
                 ? "One moment…"
                 : mode === "signin"
                   ? "Sign in"
                   : mode === "signup"
-                    ? "Sign up"
+                    ? "Create my account"
                     : mode === "magic"
                       ? "Email me a sign-in link"
                       : "Email me a reset link"}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { AiNotice } from "../components/AiNotice";
 import { api, ClaimClass, Item, RoomScan, Salvageable, ScannedItem } from "../api";
 import { PageBack } from "../lib/PageBackContext";
 import { Hint } from "../components/Hint";
@@ -690,8 +691,11 @@ export default function Inventory() {
             Choose from gallery
           </button>
         </div>
+        <AiNotice kind="photo" />
         <input
           ref={cameraRef}
+          aria-label="Take a photo"
+          tabIndex={-1}
           type="file"
           accept="image/*"
           capture="environment"
@@ -700,6 +704,8 @@ export default function Inventory() {
         />
         <input
           ref={galleryRef}
+          aria-label="Choose photos from your gallery"
+          tabIndex={-1}
           type="file"
           accept="image/*"
           multiple
@@ -811,11 +817,12 @@ export default function Inventory() {
 
             <div className="grid grid-2" style={{ marginTop: 12 }}>
               <div>
-                <label>
+                <label htmlFor="batch-room-input">
                   Room{" "}
                   <Hint text="We guessed this from the photo. Pick one of your existing rooms or type a new name; it applies to every item in this batch." />
                 </label>
                 <input
+                  id="batch-room-input"
                   value={batchRoom}
                   list="batch-rooms"
                   placeholder="e.g. Living room"
@@ -916,8 +923,9 @@ export default function Inventory() {
                     {open && (
                       <div className="grid grid-2" style={{ marginTop: 12 }}>
                         <div>
-                          <label>Damage type</label>
+                          <label htmlFor={`damage-type-${d.draft_id}`}>Damage type</label>
                           <select
+                            id={`damage-type-${d.draft_id}`}
                             value={d.damage_type}
                             onChange={(e) => updateDraft(d.draft_id, { damage_type: e.target.value })}
                           >
@@ -925,9 +933,11 @@ export default function Inventory() {
                           </select>
                         </div>
                         <div>
-                          <label>Replacement value (CAD)</label>
+                          <label htmlFor={`value-${d.draft_id}`}>Replacement value (CAD)</label>
                           <input
+                            id={`value-${d.draft_id}`}
                             type="number"
+                            inputMode="numeric"
                             min={0}
                             value={Number.isFinite(d.estimated_value) ? d.estimated_value : 0}
                             onChange={(e) => {
@@ -955,8 +965,9 @@ export default function Inventory() {
                           </div>
                         </div>
                         <div>
-                          <label>When did you buy it? (optional)</label>
+                          <label htmlFor={`bought-${d.draft_id}`}>When did you buy it? (optional)</label>
                           <input
+                            id={`bought-${d.draft_id}`}
                             type="date"
                             value={d.purchase_date}
                             max={new Date().toISOString().slice(0, 10)}
@@ -1687,6 +1698,7 @@ function ItemActions(
               <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                 <input
                   value={newRoom}
+                  aria-label="New room name"
                   placeholder="New room"
                   onChange={(e) => setNewRoom(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && moveTo(newRoom)}
@@ -1805,6 +1817,8 @@ function ItemReceipt({ item, caseId, onChange }: { item: Item; caseId: string; o
           <span className="muted" style={{ fontSize: 11 }}>Receipt</span>
           <input
             type="file"
+            aria-label="Attach a receipt photo"
+            tabIndex={-1}
             accept="image/*"
             style={{ display: "none" }}
             disabled={busy}

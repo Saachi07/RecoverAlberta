@@ -46,7 +46,7 @@ const RECEIPT_TIPS: Record<AleCategory, string> = {
 };
 
 function formatMoney(amount: number): string {
-  return amount.toLocaleString(undefined, { style: "currency", currency: "CAD" });
+  return amount.toLocaleString("en-CA", { style: "currency", currency: "CAD" });
 }
 
 function formatDate(iso?: string | null): string {

@@ -16,6 +16,8 @@ import FirstRun from "./pages/FirstRun";
 import Settings from "./pages/Settings";
 import Terms from "./pages/legal/Terms";
 import Privacy from "./pages/legal/Privacy";
+import Cookies from "./pages/legal/Cookies";
+import Refunds from "./pages/legal/Refunds";
 import Presentation from './pages/Presentation';
 import { TermsGate } from "./components/TermsGate";
 import { BrandLoader } from "./components/BrandLoader";
@@ -536,6 +538,8 @@ export default function App() {
             <Route path="/emergency" element={<Emergency />} />
             <Route path="/legal/terms" element={<Terms />} />
             <Route path="/legal/privacy" element={<Privacy />} />
+            <Route path="/legal/cookies" element={<Cookies />} />
+            <Route path="/legal/refunds" element={<Refunds />} />
             <Route path="/home" element={<Private><Home /></Private>} />
             <Route path="/dashboard" element={<Private><Dashboard /></Private>} />
             <Route path="/profile" element={<Private><Profile /></Private>} />

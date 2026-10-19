@@ -20,9 +20,12 @@ const ALBERTA = [
 type Props = {
   value: string;
   onChange: (v: string) => void;
+  id?: string;
+  required?: boolean;
 };
 
-export function LocationAutocomplete({ value, onChange }: Props) {
+export function LocationAutocomplete({ value, onChange, id = "location-input", required }: Props) {
+  const listId = `${id}-list`;
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -51,7 +54,13 @@ export function LocationAutocomplete({ value, onChange }: Props) {
   return (
     <div className="autocomplete" ref={wrapRef}>
       <input
+        id={id}
         type="text"
+        role="combobox"
+        aria-controls={listId}
+        aria-activedescendant={open && matches[activeIdx] ? `${id}-opt-${activeIdx}` : undefined}
+        aria-required={required || undefined}
+        required={required}
         value={value}
         placeholder="Start typing your city or town…"
         autoComplete="off"
@@ -68,10 +77,11 @@ export function LocationAutocomplete({ value, onChange }: Props) {
         aria-expanded={open}
       />
       {open && matches.length > 0 && (
-        <div className="autocomplete-list" role="listbox">
+        <div className="autocomplete-list" id={listId} role="listbox">
           {matches.map((m, i) => (
             <div
               key={m}
+              id={`${id}-opt-${i}`}
               role="option"
               aria-selected={i === activeIdx}
               className={`autocomplete-item${i === activeIdx ? " active" : ""}`}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, RoomScan } from "../api";
 
 // "Try it yourself" on the public landing page: drop one room photo and see a
@@ -12,6 +13,7 @@ export default function DemoDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [scan, setScan] = useState<RoomScan | null>(null);
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export default function DemoDropzone() {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
+    if (!agreed) return;
     const f = e.dataTransfer.files?.[0];
     if (f) run(f);
   }
@@ -67,9 +70,10 @@ export default function DemoDropzone() {
         <div
           className={`dropzone${dragOver ? " over" : ""}`}
           role="button"
-          tabIndex={0}
-          onClick={() => inputRef.current?.click()}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+          tabIndex={agreed ? 0 : -1}
+          aria-disabled={!agreed}
+          onClick={() => { if (agreed) inputRef.current?.click(); }}
+          onKeyDown={(e) => { if (agreed && (e.key === "Enter" || e.key === " ")) inputRef.current?.click(); }}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
@@ -90,6 +94,8 @@ export default function DemoDropzone() {
           <input
             ref={inputRef}
             type="file"
+            aria-label="Choose or take a photo of a room"
+            tabIndex={-1}
             accept={ACCEPTED}
             capture="environment"
             style={{ display: "none" }}
@@ -99,7 +105,21 @@ export default function DemoDropzone() {
       )}
 
       {!done && (
-        <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        <div className="check-row" style={{ marginTop: 12 }}>
+          <input id="demo-consent" type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
+          <label htmlFor="demo-consent">
+            I agree to send this photo to Google's Gemini service to be analyzed, as described in the{" "}
+            <Link to="/legal/privacy" target="_blank" rel="noopener">Privacy Policy</Link>.
+            {!agreed && <span className="sr-only"> Tick this box to enable the photo area.</span>}
+          </label>
+        </div>
+      )}
+      {!done && !agreed && (
+        <p className="field-help" role="status">Tick the box above to choose a photo.</p>
+      )}
+
+      {!done && (
+        <p className="muted-strong" style={{ fontSize: 13, marginTop: 8 }}>
           One photo, just to show you how it works. It's scanned and then
           deleted right away. We do not keep demo photos.
         </p>

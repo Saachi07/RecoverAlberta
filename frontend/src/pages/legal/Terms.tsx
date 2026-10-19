@@ -1,8 +1,9 @@
+import { LegalLayout } from "./LegalLayout";
+import { BUSINESS } from "../../legal/business";
+
 export default function Terms() {
   return (
-    <div className="legal">
-      <h1>TERMS AND CONDITIONS OF USE</h1>
-      <p className="muted">Last Updated: 11/06/2026</p>
+    <LegalLayout title="Terms of Service">
 
       <h2>ACCEPTANCE OF TERMS</h2>
       <p>
@@ -12,10 +13,9 @@ export default function Terms() {
 
       <h2>DEFINITIONS</h2>
       <p>
-        <strong>"Rebuildr"</strong> means the application, a non-commercial student project
-        organized under the laws of Alberta, Canada, that provides disaster preparedness
-        reminders, document organization tools, and plain-language policy summaries for
-        educational purposes only.
+        <strong>"Rebuildr"</strong> means the application, a free, non-commercial student project
+        based in Alberta, Canada, that provides disaster preparedness reminders, document
+        organization tools, and plain-language policy summaries.
       </p>
       <p>
         <strong>"Content"</strong> means any photos, documents, inventory lists, or other data
@@ -57,8 +57,8 @@ export default function Terms() {
         of photos and documents). By using Rebuildr, you consent to your Content being processed
         by these processors, which may operate servers outside Canada. Google Gemini outputs may
         be inaccurate or incomplete. Reliance on AI outputs is at your sole risk. Because AI
-        analysis is central to the Service, you cannot opt out. If you do not consent, do not use
-        Rebuildr.
+        analysis is central to the Service, we cannot analyze a file without sending it to Google.
+        If you do not agree to that, do not upload files. See the Privacy Policy for details.
       </p>
 
       <h2>DISCLAIMER OF WARRANTIES</h2>
@@ -73,7 +73,8 @@ export default function Terms() {
       <p>
         To the maximum extent permitted by Alberta law, Rebuildr's total liability for any claim
         arising from these Terms or the Service shall not exceed the greater of (a) the amount
-        you paid Rebuildr in the prior 12 months, or (b) $100. Rebuildr is not liable for any
+        you paid Rebuildr in the prior 12 months (the Service is free), or (b) $100. Nothing in these Terms limits rights
+        you have under consumer protection or privacy law that cannot be waived. Rebuildr is not liable for any
         indirect, incidental, special, consequential, or punitive damages, including lost profits,
         lost data, or insurance claim denials. This limitation applies even if Rebuildr has been
         advised of such damages.
@@ -90,8 +91,8 @@ export default function Terms() {
       <p>
         You may delete your account at any time. Rebuildr will remove your Content from active
         systems within 30 days, except for legal compliance or backups. Rebuildr may suspend or
-        terminate your account immediately for violating these Terms. Sections 8, 9, 10, 12, and
-        16 survive any termination.
+        terminate your account immediately for violating these Terms. Provisions that by their nature
+        should continue (ownership, disclaimers, limits of liability, indemnity, governing law) survive termination.
       </p>
 
       <h2>GOVERNING LAW</h2>
@@ -104,7 +105,7 @@ export default function Terms() {
       <h2>COPYRIGHT COMPLAINTS</h2>
       <p>
         If you believe your copyright-protected work has been copied on the Service without
-        permission, please contact Rebuildr at copyright@rebuildr.com with a description of the
+        permission, please contact Rebuildr at {BUSINESS.contactEmail} with a description of the
         work and its location. We will respond to valid notices.
       </p>
 
@@ -121,15 +122,14 @@ export default function Terms() {
       </p>
 
       <h2>CONTACT</h2>
-      <p>For questions or account deletion: legal@rebuildr.com</p>
+      <p>For questions or account deletion: {BUSINESS.contactEmail}</p>
 
-      <h2>NO LEGAL ADVICE</h2>
+      <h2>NOT A LAW FIRM</h2>
       <p>
-        Rebuildr is not a law firm. These terms were generated from a template and do not constitute legal
-        advice. No communication with Rebuildr creates an attorney-client relationship. You are solely
+        Rebuildr is not a law firm, and these Terms are not legal advice. No communication with Rebuildr creates an attorney-client relationship. You are solely
         responsible for ensuring these terms comply with all applicable laws. If you need legal advice,
         consult a licensed Alberta lawyer.
       </p>
-    </div>
+    </LegalLayout>
   );
 }

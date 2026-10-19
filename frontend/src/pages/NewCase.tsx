@@ -5,6 +5,8 @@ import { PageBack } from "../lib/PageBackContext";
 import { Hint } from "../components/Hint";
 import { LocationAutocomplete } from "../components/LocationAutocomplete";
 import { Spinner } from "../components/Skeleton";
+import { Field } from "../components/forms/Field";
+import { MissingList, MissingItem } from "../components/forms/MissingList";
 import { useCases } from "../lib/CasesContext";
 
 // Big tappable cards instead of a dropdown: every option visible at once,
@@ -135,6 +137,16 @@ export default function NewCase() {
   // If the draft never got created (for example the initial draft save failed),
   // we create the case outright from the filled-in form so the user is never
   // stuck behind a dead button.
+  // What still blocks each step. Location is the one thing we truly need to
+  // match local programs; everything else has a sensible default or is optional.
+  const missingByStep: MissingItem[][] = [
+    form.disaster_type ? [] : [{ id: "disaster-label", message: "Pick the kind of disaster" }],
+    form.location.trim() ? [] : [{ id: "case-location", message: "Tell us where it happened (a city or area is enough)" }],
+    [],
+  ];
+  const stepMissing = missingByStep[step] ?? [];
+  const allMissing = missingByStep.flat();
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
@@ -231,7 +243,7 @@ export default function NewCase() {
         <form onSubmit={submit}>
           {step === 0 && (
             <>
-              <label id="disaster-label">What kind of disaster was it?</label>
+              <label id="disaster-label" tabIndex={-1}>What kind of disaster was it?<span className="req" aria-hidden="true"> *</span><span className="sr-only"> (required)</span></label>
               <p className="muted-strong" style={{ margin: "0 0 10px", fontSize: 14 }}>
                 We've started you on the most common one, change it if it's not right.
               </p>
@@ -255,11 +267,14 @@ export default function NewCase() {
 
           {step === 1 && (
             <>
-              <label>
-                Where did it happen?{" "}
+              <label htmlFor="case-location">
+                Where did it happen?<span className="req" aria-hidden="true"> *</span>
+                <span className="sr-only"> (required)</span>{" "}
                 <Hint text="We use this to match you with local emergency services and resources. We currently know Alberta best." />
               </label>
               <LocationAutocomplete
+                id="case-location"
+                required
                 value={form.location}
                 onChange={(v) => update("location", v)}
               />
@@ -293,20 +308,19 @@ export default function NewCase() {
                 onChange={(e) => update("incident_date", e.target.value)}
               />
 
-              <label>
-                Name for this case (optional){" "}
-                <Hint text="Just a label to find it later. We'll pick a sensible one if you leave this blank, and you can change it anytime." />
-              </label>
-              <input
+              <Field
+                label="Name for this case"
                 value={form.case_name}
+                onChange={(v) => update("case_name", v)}
+                maxLength={80}
                 placeholder={suggestedName()}
-                onChange={(e) => update("case_name", e.target.value)}
+                help="Just a label to find it later. We'll pick a sensible one if you leave this blank, and you can change it anytime."
               />
             </>
           )}
 
-          {//{err && <div className="error">{err}</div>}
-}
+          <MissingList items={step < STEPS.length - 1 ? stepMissing : allMissing} id="newcase-missing" />
+          {err && <div className="error" role="alert">{err}</div>}
           <div className="row" style={{ marginTop: 20 }}>
             {step > 0 && (
               <button type="button" className="secondary" disabled={busy} onClick={() => setStep((s) => s - 1)}>
@@ -315,12 +329,12 @@ export default function NewCase() {
             )}
             <span className="spacer" />
             {step < STEPS.length - 1 ? (
-              <button type="button" className="big" onClick={() => setStep((s) => s + 1)}>
+              <button type="button" className="big" disabled={stepMissing.length > 0} aria-describedby={stepMissing.length ? "newcase-missing" : undefined} onClick={() => setStep((s) => s + 1)}>
                 Next
               </button>
             ) : (
-              <button type="submit" disabled={busy} className="big">
-                {busy ? "Setting things up…" : "Continue"}
+              <button type="submit" disabled={busy || allMissing.length > 0} aria-describedby={allMissing.length ? "newcase-missing" : undefined} className="big">
+                {busy ? "Setting things up…" : "Create my case"}
               </button>
             )}
           </div>

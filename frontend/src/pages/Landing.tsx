@@ -16,14 +16,14 @@ const BASE = import.meta.env.BASE_URL;
 const PILLARS = [
   {
     title: "List what you lost",
-    body: "Photograph a room and our AI builds a claim-ready inventory with values.",
+    body: "Photograph a room and our AI drafts an inventory with estimated values. You review and edit it before anything is saved.",
     // Drop a screenshot of the inventory scan result here (PNG, ~390px wide).
     img: `${BASE}landing/mockup-inventory.png`,
     alt: "Rebuildr inventory: a scanned room with itemized values",
   },
   {
     title: "Read your insurance, for you",
-    body: "Upload your policy and we pull out coverage, deductibles, and deadlines in plain language.",
+    body: "Upload your policy and we draft a plain-language summary of coverage, deductibles, and deadlines. Always confirm the details with your insurer.",
     // Drop a screenshot of the document analysis summary here.
     img: `${BASE}landing/mockup-policy.png`,
     alt: "Rebuildr policy analysis: plain-language summary with deadlines",
@@ -65,21 +65,6 @@ const ALBERTA_DESK = [
   {
     title: "Alberta Emergency Alert",
     detail: "Official wildfire, flood, and evacuation notices for your area.",
-  },
-];
-
-// Two real testimonials go here once collected. Placeholders keep the layout and
-// tone in place; fill in `quote`, `name`, and `attribution` when ready.
-const TESTIMONIALS = [
-  {
-    quote: "",
-    name: "Fire survivor (name withheld by request)",
-    placeholder: "The insurance process after a house fire has been stressful, identifying everything I owned and estimating its value. I wish there were AI tools to help streamline that task.",
-  },
-  {
-    quote: "",
-    name: "Dr. Peter Silverstone, University of Alberta",
-    placeholder: "Preparation is crucial. Are the photos important? Do you have them stored elsewhere? What about financial documents? What happens if you get locked out? Are there mementos that are really important?",
   },
 ];
 
@@ -211,39 +196,17 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* #5: testimonial placeholders. */}
-      <section className="landing-section">
-        <div className="section-head">
-          <h2>Why this matters</h2>
-        </div>
-        <div className="grid grid-2">
-          {TESTIMONIALS.map((t, i) => (
-            <figure key={i} className="testimonial">
-              <blockquote>
-                {t.quote || <span className="muted">{t.placeholder}</span>}
-              </blockquote>
-              <figcaption>
-                <img className="testimonial-avatar" src={`${BASE}landing/avatar.svg`} alt="" aria-hidden />
-                <span>
-                  <strong>{t.name}</strong>
-                </span>
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      </section>
-
       {/* #3: concrete security/trust statement, true to the RLS setup. */}
       <section className="landing-section">
         <div className="card calm-card trust-badge">
-          <div className="trust-mark" aria-hidden>Secured</div>
+          <div className="trust-mark" aria-hidden>Privacy</div>
           <div>
-            <h2 style={{ marginTop: 0 }}>Your information stays yours</h2>
+            <h2 style={{ marginTop: 0 }}>How we handle your information</h2>
             <p className="muted-strong" style={{ marginBottom: 6 }}>
-              Your documents and photos are encrypted and isolated to your
-              account, so no other user can ever reach them. We use them only to
-              help your recovery, never to sell or share. You can export
-              everything or delete your account at any time.
+              Your records are encrypted in transit and stored so each account can only reach its own.
+              We do not sell your information or run ad trackers. Photos and documents you upload are
+              sent to Google's Gemini service for analysis. You can download your data or delete your
+              account from Settings.
             </p>
             <p className="muted-strong" style={{ margin: 0 }}>
               Read our{" "}
@@ -269,6 +232,10 @@ export default function Landing() {
         <Link to="/legal/privacy">Privacy Policy</Link>
         <span aria-hidden>·</span>
         <Link to="/legal/terms">Terms of Service</Link>
+        <span aria-hidden>·</span>
+        <Link to="/legal/cookies">Cookies</Link>
+        <span aria-hidden>·</span>
+        <Link to="/legal/refunds">Refunds</Link>
         <span aria-hidden>·</span>
         <Link to="/emergency">Get help now</Link>
       </footer>

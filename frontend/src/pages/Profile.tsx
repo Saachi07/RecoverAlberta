@@ -5,6 +5,7 @@ import { PageBack } from "../lib/PageBackContext";
 import { Hint } from "../components/Hint";
 import { LocationAutocomplete } from "../components/LocationAutocomplete";
 import { useAuth } from "../auth/AuthContext";
+import { Field } from "../components/forms/Field";
 
 const CHECK_LABELS: Record<string, { label: string; to?: string }> = {
   profile_name: { label: "Add your name to your profile" },
@@ -138,30 +139,32 @@ export default function Profile() {
           <div className="card">
             <h3 style={{ marginTop: 0 }}>About you</h3>
             <form onSubmit={save}>
-              <label>
-                Your name{" "}
-                <Hint text="Only you see this. We use it to greet you and to fill in claim forms later." />
-              </label>
-              <input
+              <Field
+                label="Your name"
                 value={form.full_name}
+                onChange={(v) => setForm({ ...form, full_name: v })}
+                maxLength={100}
+                autoComplete="name"
                 placeholder="e.g. Jane Doe"
-                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                help="Only you see this. We use it to greet you and to fill in claim forms later."
               />
 
-              <label>
+              <label htmlFor="profile-location">
                 Where you live{" "}
                 <Hint text="Used to match you with local emergency services and resources. We currently know Alberta best." />
               </label>
               <LocationAutocomplete
+                id="profile-location"
                 value={form.location}
                 onChange={(v) => setForm({ ...form, location: v })}
               />
 
-              <label>Email</label>
-              <input value={user?.email ?? ""} disabled />
+              <label htmlFor="profile-email">Email</label>
+              <input id="profile-email" value={user?.email ?? ""} disabled aria-describedby="profile-email-help" />
+              <p id="profile-email-help" className="field-help">This is the email you signed in with.</p>
 
               {saved && (
-                <p className="muted-strong" style={{ marginTop: 10, color: "var(--focus)" }}>
+                <p className="muted-strong" role="status" style={{ marginTop: 10, color: "var(--focus)" }}>
                   Saved.
                 </p>
               )}

@@ -1,3 +1,4 @@
+import { AiNotice } from "../components/AiNotice";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, CoverageLimit, GeminiAnalysis, RichAnalysis, UserDocument } from "../api";
@@ -193,6 +194,7 @@ export default function Documents() {
           disabled={uploading || analyzingNew}
           aria-label="Choose a document to upload"
         />
+        <AiNotice kind="document" />
         {uploading && (
           <div style={{ marginTop: 10 }}>
             <p className="muted-strong" style={{ margin: "0 0 6px" }} role="status">

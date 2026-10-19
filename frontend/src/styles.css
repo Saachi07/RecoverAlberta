@@ -7,25 +7,26 @@
   --panel: #fffdf9;         /* near-white warm panel */
   --panel-2: #f1e8da;       /* warm sand for inset surfaces */
   --text: #3a3027;          /* warm dark brown, ~13:1 on bg */
-  --muted: #8a7d6c;         /* warm taupe */
+  --muted: #6b5e4e;         /* warm taupe */
   --muted-strong: #5f5446;  /* stronger warm taupe, AA on bg */
-  --accent: #1f7a6b;        /* reassuring warm teal */
+  --accent: #1b6f61;        /* reassuring warm teal */
   --accent-2: #155c50;      /* deeper teal for hover */
-  --accent-soft: rgba(31, 122, 107, 0.12);
-  --danger: #c25a3f;        /* soft terracotta, not alarm-red */
+  --accent-soft: rgba(27, 111, 97, 0.12);
+  --danger: #b04e34;        /* soft terracotta, not alarm-red */
   --danger-text: #a8452e;
   --danger-soft: rgba(194, 90, 63, 0.1);
   --danger-border: rgba(194, 90, 63, 0.35);
-  --warn: #b5791f;          /* calm amber */
-  --ok: #2f7d5b;            /* calm green */
-  --info: #3f6f97;          /* warm-leaning blue */
+  --warn: #8a5a0f;          /* calm amber */
+  --ok: #256a4a;            /* calm green */
+  --info: #34607f;          /* warm-leaning blue */
   --border: #e5d9c6;        /* warm sand border */
+  --input-border: #7d705f;  /* 3:1+ against page and panel surfaces (WCAG 1.4.11) */
   --focus: #155c50;         /* deep teal focus ring */
   --meter-track: #ece1d0;
   --status-damaged-bg: rgba(194, 90, 63, 0.14);
   --status-damaged-text: #a8452e;
   --status-ok-bg: rgba(47, 125, 91, 0.16);
-  --status-ok-text: #2f7d5b;
+  --status-ok-text: #256a4a;
 
   /* Warm-tinted elevation. Shadows are brown rather than neutral grey so they
      sit in the same family as the cream surfaces and read as soft, intentional
@@ -44,25 +45,26 @@
     --panel: #fffdf9;
     --panel-2: #f1e8da;
     --text: #3a3027;
-    --muted: #8a7d6c;
+    --muted: #6b5e4e;
     --muted-strong: #5f5446;
-    --accent: #1f7a6b;
+    --accent: #1b6f61;
     --accent-2: #155c50;
-    --accent-soft: rgba(31, 122, 107, 0.12);
-    --danger: #c25a3f;
+    --accent-soft: rgba(27, 111, 97, 0.12);
+    --danger: #b04e34;
     --danger-text: #a8452e;
     --danger-soft: rgba(194, 90, 63, 0.1);
     --danger-border: rgba(194, 90, 63, 0.35);
-    --warn: #b5791f;
-    --ok: #2f7d5b;
-    --info: #3f6f97;
+    --warn: #8a5a0f;
+    --ok: #256a4a;
+    --info: #34607f;
     --border: #e5d9c6;
+    --input-border: #7d705f;
     --focus: #155c50;
     --meter-track: #ece1d0;
     --status-damaged-bg: rgba(194, 90, 63, 0.14);
     --status-damaged-text: #a8452e;
     --status-ok-bg: rgba(47, 125, 91, 0.16);
-    --status-ok-text: #2f7d5b;
+    --status-ok-text: #256a4a;
   }
 }
 
@@ -134,7 +136,9 @@ button.big { padding: 16px 24px; font-size: 17px; min-height: 56px; }
 .metric-hint-btn, .case-picker, .back-btn, .toast-action, .row-menu button):hover {
   box-shadow: none;
 }
-button:disabled { opacity: 0.55; cursor: not-allowed; }
+button:disabled, button:disabled:hover {
+  background: #d8d0c2; color: #5f5446; cursor: not-allowed; box-shadow: none; opacity: 1; transform: none;
+}
 button.chip-btn { padding: 6px 12px; font-size: 13px; min-height: 32px; }
 .link-btn {
   background: none; border: none; padding: 0; min-height: 0;
@@ -146,7 +150,7 @@ button.chip-btn { padding: 6px 12px; font-size: 13px; min-height: 32px; }
 input, select, textarea {
   background: var(--panel-2);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--input-border);
   padding: 12px 14px;
   border-radius: 10px;
   font-size: 16px;
@@ -1110,3 +1114,32 @@ label { display: block; font-size: 14px; color: var(--muted-strong); margin: 14p
   .phone-mock { width: 180px; }
   .trust-badge { flex-direction: column; }
 }
+
+/* ---- Forms: required markers, inline errors, counters, checklists ---------- */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.field { margin-bottom: 4px; }
+.field .req { color: var(--danger-text); font-weight: 700; }
+.field .opt { color: var(--muted-strong); font-weight: 400; font-size: 13px; }
+.field-help { font-size: 13px; color: var(--muted-strong); margin: 6px 0 0; }
+.field-count { font-size: 13px; color: var(--muted-strong); margin: 4px 0 0; text-align: right; }
+.field-count.near-limit { color: var(--danger-text); font-weight: 600; }
+.field-error { font-size: 14px; color: var(--danger-text); margin: 6px 0 0; min-height: 0; font-weight: 500; }
+.field-error:empty { display: none; }
+.field-error:not(:empty)::before { content: "! "; font-weight: 700; }
+input.input-invalid, textarea.input-invalid, select.input-invalid {
+  border-color: var(--danger-text); border-width: 2px;
+}
+.pw-checklist { list-style: none; padding: 0; margin: 8px 0 0; font-size: 14px; }
+.pw-checklist li { display: flex; gap: 8px; align-items: center; padding: 2px 0; color: var(--muted-strong); }
+.pw-checklist li.met { color: var(--ok); font-weight: 600; }
+.pw-checklist .pw-mark { display: inline-block; width: 1.2em; text-align: center; font-weight: 700; }
+.missing-list {
+  margin-top: 14px; padding: 10px 14px; border-radius: 8px; font-size: 14px;
+  background: var(--panel-2); border: 1px solid var(--muted-strong); color: var(--text);
+}
+.missing-list .missing-title { margin: 0 0 4px; font-weight: 600; }
+.missing-list ul { margin: 0; padding-left: 20px; }
+.missing-list a { color: var(--focus); text-decoration: underline; }
