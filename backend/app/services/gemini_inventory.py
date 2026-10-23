@@ -199,59 +199,24 @@ class RoomAnalysis(BaseModel):
     building_items_present: bool = False
 
 
-# Keyword fallback for claim_class, mirroring CLAIM_CLASS_GUIDE. Order
-# matters: building checks run first because names like "carpet" should not
-# fall through to a contents category default.
-_BUILDING_KEYWORDS = (
-    "wall-to-wall carpet", "wall to wall carpet", "carpeting", "carpet",
-    "hardwood", "laminate", "tile floor", "tiling", "flooring", "floor",
-    "wallpaper", "paint", "light fixture", "ceiling fan", "ceiling light",
-    "chandelier", "pot light", "built-in", "built in", "countertop",
-    "counter top", "cabinet", "cupboard", "wall oven", "range hood",
-    "plumbing", "sink", "faucet", "toilet", "bathtub", "shower", "window",
-    "door", "baseboard", "trim", "molding", "moulding", "radiator",
-    "water heater", "furnace",
-)
-
-_CONTENTS_EXCEPTIONS = (
-    # Items whose names contain a building keyword but are clearly portable.
-    "area rug", "throw rug", "rug", "door mat", "doormat", "window fan",
-    "floor lamp", "table lamp", "lamp", "curtain", "drape", "blind",
-    "mirror", "painting", "paint set", "paint brush",
-)
-
-_BUILDING_NOTE = (
-    "Usually part of the building. Homeowners claim it under dwelling "
-    "coverage; renters should report it to their landlord."
-)
-_UNCLEAR_NOTE = (
-    "Could be contents or part of the building. Ask your adjuster how to "
-    "claim it."
-)
+# Notes are defined next to the taxonomy; re-exported here for older imports.
+from .taxonomy import BUILDING_NOTE as _BUILDING_NOTE  # noqa: E402
+from .taxonomy import UNCLEAR_NOTE as _UNCLEAR_NOTE  # noqa: E402
+from .taxonomy import resolve_claim_class  # noqa: E402
 
 
 def classify_claim_class(name: str, category: str) -> tuple[str, Optional[str]]:
     """Deterministic contents-vs-building fallback used when the model omits
-    claim_class. Canadian homeowner policy convention: portable belongings
-    are contents (personal property coverage); permanent fixtures and
-    finishes are part of the building (dwelling coverage)."""
-    lowered = (name or "").lower()
-    if any(kw in lowered for kw in _CONTENTS_EXCEPTIONS):
-        return "contents", None
-    if any(kw in lowered for kw in _BUILDING_KEYWORDS):
-        return "building", _BUILDING_NOTE
+    claim_class. Looks the name up in the taxonomy (whole-token, longest alias
+    wins; see taxonomy.py). Names the taxonomy does not know fall back to the
+    model's category: portable-goods categories are contents, anything else is
+    unclear and sends the user to their adjuster."""
+    resolved = resolve_claim_class(name)
+    if resolved is not None:
+        claim_class, note, _leaf_id = resolved
+        return claim_class, note
     if category in {"furniture", "electronics", "decor", "clothing"}:
         return "contents", None
-    if category == "appliance":
-        # Freestanding appliances are contents, built-ins are building; from
-        # a name alone we usually cannot tell which. Dishwashers and ovens
-        # are checked first because they are usually built in but the names
-        # contain freestanding keywords ("washer").
-        if any(kw in lowered for kw in ("dishwasher", "oven", "stove", "range", "cooktop")):
-            return "unclear", _UNCLEAR_NOTE
-        if any(kw in lowered for kw in ("fridge", "refrigerator", "washer", "dryer", "microwave", "toaster", "kettle", "blender", "air fryer", "vacuum")):
-            return "contents", None
-        return "unclear", _UNCLEAR_NOTE
     return "unclear", _UNCLEAR_NOTE
 
 

@@ -1,0 +1,115 @@
+id,name,group,claim_class,legacy_category,bulk,modifiers,high_value,aliases,lifespan_years,price_band_source,reviewed
+chair,Chair,Seating,contents,furniture,0,0,0,chair|wooden chair|plastic chair|folding chair|dining chair|kitchen chair|side chair|accent chair,,,0
+office_chair,Office chair,Seating,contents,furniture,0,0,0,office chair|desk chair|task chair|gaming chair|swivel chair,,,0
+sofa,Sofa,Seating,contents,furniture,0,0,0,sofa|couch|settee|sectional|sectional sofa|chesterfield,,,0
+loveseat,Loveseat,Seating,contents,furniture,0,0,0,loveseat|love seat,,,0
+armchair,Armchair,Seating,contents,furniture,0,0,0,armchair|arm chair|recliner|lounge chair|club chair,,,0
+stool,Stool,Seating,contents,furniture,0,0,0,stool|bar stool|counter stool,,,0
+bench,Bench,Seating,contents,furniture,0,0,0,bench|storage bench|piano bench,,,0
+ottoman,Ottoman,Seating,contents,furniture,0,0,0,ottoman|pouf|footstool|foot stool,,,0
+table,Table,Tables,contents,furniture,0,0,0,table,,,0
+dining_table,Dining table,Tables,contents,furniture,0,0,0,dining table|kitchen table,,,0
+coffee_table,Coffee table,Tables,contents,furniture,0,0,0,coffee table,,,0
+side_table,Side table,Tables,contents,furniture,0,0,0,side table|end table|accent table|console table,,,0
+desk,Desk,Tables,contents,furniture,0,0,0,desk|writing desk|computer desk|standing desk,,,0
+nightstand,Nightstand,Tables,contents,furniture,0,0,0,nightstand|night stand|bedside table,,,0
+tv_stand,TV stand,Tables,contents,furniture,0,0,0,tv stand|media console|entertainment center|tv unit|tv cabinet,,,0
+dresser,Dresser,Storage furniture,contents,furniture,0,0,0,dresser|chest of drawers|tallboy|lowboy,,,0
+bookshelf,Bookshelf,Storage furniture,contents,furniture,0,0,0,bookshelf|bookcase|book shelf|shelving unit|shelf unit|shelves|shelf,,,0
+wardrobe,Wardrobe,Storage furniture,contents,furniture,0,0,0,wardrobe|armoire,,,0
+freestanding_cabinet,Freestanding cabinet,Storage furniture,contents,furniture,0,0,0,freestanding cabinet|free standing cabinet|storage cabinet|china cabinet|display cabinet|curio cabinet|sideboard|buffet|hutch,,,0
+filing_cabinet,Filing cabinet,Storage furniture,contents,furniture,0,0,0,filing cabinet|file cabinet,,,0
+shoe_rack,Shoe rack,Storage furniture,contents,furniture,0,0,0,shoe rack|shoe cabinet|shoe organizer,,,0
+cabinet_unspecified,Cabinet (type not clear),Storage furniture,unclear,furniture,0,1,0,cabinet,,,0
+mattress,Mattress,Beds,contents,furniture,0,0,0,mattress|box spring|mattress set,,,0
+bed_frame,Bed frame,Beds,contents,furniture,0,0,0,bed frame|bed|headboard|bunk bed|platform bed|daybed,,,0
+crib,Crib,Beds,contents,furniture,0,0,0,crib|cot|bassinet,,,0
+refrigerator,Refrigerator,Major appliances,contents,appliance,0,1,0,refrigerator|fridge|fridge freezer|refrigerator freezer,,,0
+freezer,Freezer,Major appliances,contents,appliance,0,1,0,freezer|chest freezer|deep freezer|upright freezer,,,0
+washer,Washer,Major appliances,contents,appliance,0,1,0,washer|washing machine|clothes washer,,,0
+dryer,Dryer,Major appliances,contents,appliance,0,1,0,dryer|clothes dryer|tumble dryer,,,0
+dishwasher,Dishwasher,Major appliances,unclear,appliance,0,1,0,dishwasher,,,0
+range,Range or stove,Major appliances,unclear,appliance,0,1,0,range|stove|stove top|stovetop|cooktop|cook top|gas range|electric range,,,0
+oven_unspecified,Oven (type not clear),Major appliances,unclear,appliance,0,1,0,oven|convection oven,,,0
+microwave,Microwave,Major appliances,contents,appliance,0,1,0,microwave|microwave oven,,,0
+air_conditioner,Air conditioner,Major appliances,unclear,appliance,0,0,0,air conditioner|ac unit|portable air conditioner|window air conditioner|window ac|a/c unit,,,0
+dehumidifier,Dehumidifier,Major appliances,contents,appliance,0,0,0,dehumidifier|humidifier,,,0
+kettle,Kettle,Small appliances,contents,appliance,0,0,0,kettle|electric kettle,,,0
+toaster,Toaster,Small appliances,contents,appliance,0,0,0,toaster|toaster oven,,,0
+air_fryer,Air fryer,Small appliances,contents,appliance,0,0,0,air fryer|airfryer,,,0
+vacuum,Vacuum,Small appliances,contents,appliance,0,0,0,vacuum|vacuum cleaner|robot vacuum|shop vac,,,0
+blender,Blender,Small appliances,contents,appliance,0,0,0,blender|food processor|immersion blender,,,0
+coffee_maker,Coffee maker,Small appliances,contents,appliance,0,0,0,coffee maker|coffee machine|espresso machine|keurig|coffee grinder,,,0
+stand_mixer,Stand mixer,Small appliances,contents,appliance,0,0,0,stand mixer|mixer|hand mixer,,,0
+slow_cooker,Slow cooker or multicooker,Small appliances,contents,appliance,0,0,0,slow cooker|crock pot|instant pot|pressure cooker|rice cooker|multicooker,,,0
+iron,Iron,Small appliances,contents,appliance,0,0,0,iron|clothes iron|steamer|ironing board,,,0
+fan,Fan,Small appliances,contents,appliance,0,0,0,fan|table fan|pedestal fan|box fan|window fan|tower fan,,,0
+space_heater,Space heater,Small appliances,contents,appliance,0,0,0,space heater|portable heater|electric heater,,,0
+tv,Television,Electronics,contents,electronics,0,0,0,tv|television|smart tv|flat screen|flat screen tv|flatscreen|oled tv|led tv,,,0
+laptop,Laptop,Electronics,contents,electronics,0,0,0,laptop|notebook computer|macbook|chromebook,,,0
+desktop_computer,Desktop computer,Electronics,contents,electronics,0,0,0,desktop computer|computer tower|pc|desktop pc|imac|computer,,,0
+monitor,Computer monitor,Electronics,contents,electronics,0,0,0,monitor|computer monitor|display monitor,,,0
+game_console,Game console,Electronics,contents,electronics,0,0,0,game console|gaming console|playstation|xbox|nintendo switch|ps5|ps4,,,0
+audio_system,Audio system,Electronics,contents,electronics,0,0,0,soundbar|sound bar|speaker|speakers|bluetooth speaker|stereo|home theater|surround sound|record player|turntable|receiver,,,0
+network_gear,Router or modem,Electronics,contents,electronics,0,0,0,router|modem|wifi router|wi-fi router|mesh router,,,0
+tablet,Tablet or e-reader,Electronics,contents,electronics,0,0,0,tablet|ipad|e-reader|ereader|kindle,,,0
+phone,Phone,Electronics,contents,electronics,0,0,0,phone|smartphone|cell phone|cellphone|iphone|landline,,,0
+printer,Printer,Electronics,contents,electronics,0,0,0,printer|scanner|3d printer,,,0
+camera,Camera,Electronics,contents,electronics,0,0,0,camera|dslr|camcorder|drone|gopro,,,0
+headphones,Headphones,Electronics,contents,electronics,0,0,0,headphones|earbuds|headset|airpods,,,0
+area_rug,Area rug,Soft goods,contents,decor,0,0,0,area rug|rug|throw rug|runner|carpet runner|persian carpet|oriental carpet|persian rug|oriental rug|door mat|doormat|bath mat,,,0
+window_coverings,Curtains or blinds,Soft goods,contents,decor,0,0,0,curtain|curtains|drape|drapes|drapery|blind|blinds|window blind|shade|window shade|valance,,,0
+bedding,Bedding,Soft goods,contents,other,1,0,0,bedding|bed sheet|sheets|duvet|comforter|pillow|pillows|blanket|quilt|bedspread,,,0
+linens,Linens and towels,Soft goods,contents,other,1,0,0,linen|linens|towel|towels|bath towel|tablecloth|shower curtain,,,0
+framed_art,Framed art or photos,Decor,contents,decor,0,0,0,painting|framed art|wall art|picture|framed picture|photo frame|picture frame|poster|print,,,0
+mirror,Mirror,Decor,contents,decor,0,0,0,mirror|wall mirror|floor mirror|vanity mirror,,,0
+floor_lamp,Floor lamp,Decor,contents,decor,0,0,0,floor lamp|standing lamp|torchiere,,,0
+table_lamp,Table lamp,Decor,contents,decor,0,0,0,table lamp|desk lamp|bedside lamp|lamp,,,0
+houseplant,Houseplant,Decor,contents,decor,0,0,0,plant|houseplant|potted plant|planter|artificial plant,,,0
+decor_misc,Decor items,Decor,contents,decor,1,0,0,decor|decoration|decorations|decorative item|vase|figurine|candle|ornament|clock|wall clock|knickknack,,,0
+dishes_glassware,Dishes and glassware,Kitchenware,contents,other,1,0,0,dishes|dish|dishware|plates|plate|bowls|bowl|dinnerware|glassware|mugs|mug|cups|cup|china,,,0
+cookware_utensils,Cookware and utensils,Kitchenware,contents,other,1,0,0,cookware|pots|pot|pans|pan|bakeware|frying pan|utensils|cutlery|silverware|flatware|knives|knife set|cooking utensils,,,0
+clothing,Clothing,Clothing,contents,clothing,1,0,0,clothes|clothing|garment|shirt|shirts|pants|dress|sweater|jeans|suit|apparel,,,0
+coats,Coats and outerwear,Clothing,contents,clothing,1,0,0,coat|coats|jacket|jackets|parka|winter coat|outerwear,,,0
+shoes,Shoes and boots,Clothing,contents,clothing,1,0,0,shoe|shoes|boot|boots|sneaker|sneakers|footwear,,,0
+closet_contents,Closet contents,Clothing,contents,clothing,1,0,0,closet contents|clothes in closet|wardrobe contents|hanging clothes,,,0
+books_media,Books and media,Books and media,contents,other,1,0,0,book|books|bookshelf contents|novel|textbook|dvd|dvds|cd|cds|vinyl record|records|media collection|magazine|magazines,,,0
+power_tools,Power tools,Tools and garage,contents,other,0,0,0,power tool|power tools|drill|saw|circular saw|table saw|tool set|hand tools|tools,,,0
+toolbox,Toolbox,Tools and garage,contents,other,1,0,0,toolbox|tool box|tool chest,,,0
+workbench,Workbench,Tools and garage,contents,furniture,0,0,0,workbench|work bench,,,0
+bicycle,Bicycle,Tools and garage,contents,other,0,0,0,bicycle|bike|e-bike|ebike|electric bike|mountain bike,,,0
+ladder,Ladder,Tools and garage,contents,other,0,0,0,ladder|step ladder|stepladder,,,0
+generator,Generator,Tools and garage,contents,other,0,0,0,generator|portable generator,,,0
+art_supplies,Paint and craft supplies,Tools and garage,contents,other,1,0,0,paint set|paint brush|paintbrush|paint can|art supplies|craft supplies,,,0
+patio_set,Patio or outdoor furniture,Outdoor,contents,furniture,0,0,0,patio set|patio furniture|patio chair|patio table|outdoor furniture|outdoor chair|outdoor table|deck chair|lawn chair|adirondack chair|hammock,,,0
+bbq,BBQ grill,Outdoor,contents,appliance,0,0,0,bbq|barbecue|grill|propane grill|bbq grill|smoker,,,0
+lawn_equipment,Lawn and snow equipment,Outdoor,contents,other,0,0,0,lawn mower|lawnmower|mower|snowblower|snow blower|weed trimmer|string trimmer|leaf blower|chainsaw|garden tools,,,0
+outbuilding_structure,"Shed, fence, or deck",Outdoor,unclear,other,0,0,0,shed|storage shed|fence|deck|gazebo|pergola|playset|swing set|trampoline|hot tub,,,0
+baby_gear,Baby and child gear,Children,contents,other,0,0,0,stroller|pram|car seat|infant car seat|high chair|baby swing|baby gear|playpen|baby monitor,,,0
+toys,Toys and games,Children,contents,other,1,0,0,toy|toys|toy bin|lego|stuffed animal|stuffed animals|board game|board games|games,,,0
+jewelry,Jewelry and watches,High-value,contents,other,0,0,1,jewelry|jewellery|ring|necklace|watch|bracelet|earrings|wristwatch,,,0
+musical_instrument,Musical instrument,High-value,contents,other,0,0,1,musical instrument|instrument|piano|digital piano|electric keyboard|guitar|electric guitar|violin|drum kit|drums,,,0
+artwork_collectible,Artwork or collectible,High-value,contents,decor,0,0,1,original artwork|original painting|oil painting|sculpture|antique|collectible|collectibles|coin collection|stamp collection|art,,,0
+fitness_equipment,Fitness equipment,High-value,contents,other,0,0,1,treadmill|exercise bike|elliptical|weight bench|dumbbell|dumbbells|weights|barbell|peloton|rowing machine|fitness equipment,,,0
+sports_gear,Sports gear,High-value,contents,other,0,0,0,sports equipment|golf clubs|skis|snowboard|hockey equipment|hockey bag|sports gear|camping gear|tent,,,0
+wall_to_wall_carpet,Wall-to-wall carpet,Building items,building,other,0,0,0,wall-to-wall carpet|wall to wall carpet|wall to wall carpeting|carpeting|carpet|fitted carpet,,,0
+hardwood_flooring,Hardwood flooring,Building items,building,other,0,0,0,hardwood|hardwood floor|hardwood flooring|engineered hardwood,,,0
+laminate_flooring,Laminate or vinyl flooring,Building items,building,other,0,0,0,laminate|laminate flooring|vinyl plank|vinyl flooring|lvp|linoleum,,,0
+tile_flooring,Tile,Building items,building,other,0,0,0,tile|tiles|tile floor|tile flooring|tiling|ceramic tile|backsplash,,,0
+flooring_generic,Flooring,Building items,building,other,0,0,0,floor|floors|flooring,,,0
+wallpaper,Wallpaper,Building items,building,other,0,0,0,wallpaper|wall covering,,,0
+wall_finish,"Walls, paint, ceiling",Building items,building,other,0,0,0,paint|painted wall|wall paint|drywall|interior wall|ceiling|ceilings,,,0
+light_fixture,Light fixture,Building items,building,other,0,0,0,light fixture|light fixtures|ceiling light|pot light|pot lights|recessed light|chandelier|pendant light|sconce|wall sconce|track lighting|vanity light,,,0
+ceiling_fan,Ceiling fan,Building items,building,other,0,0,0,ceiling fan,,,0
+countertop,Countertop,Building items,building,other,0,0,0,countertop|countertops|counter top|counter|worktop|kitchen island,,,0
+built_in_cabinets,Built-in cabinets,Building items,building,other,0,0,0,kitchen cabinet|kitchen cabinets|bathroom cabinet|built-in cabinet|built in cabinet|cupboard|cupboards|bathroom vanity|vanity cabinet,,,0
+wall_oven,Wall oven,Building items,building,appliance,0,0,0,wall oven|double wall oven|built-in wall oven,,,0
+range_hood,Range hood,Building items,building,appliance,0,0,0,range hood|rangehood|exhaust hood|over range hood|hood fan,,,0
+plumbing_fixture,"Sink, faucet, toilet, tub",Building items,building,other,0,0,0,sink|faucet|tap|toilet|bathtub|tub|shower|shower stall|plumbing,,,0
+window,Window,Building items,building,other,0,0,0,window|windows|window frame|skylight,,,0
+door,Door,Building items,building,other,0,0,0,door|doors|front door|garage door|patio door|sliding door|closet door|storm door,,,0
+trim_molding,Baseboard and trim,Building items,building,other,0,0,0,baseboard|baseboards|trim|molding|moulding|crown molding|casing,,,0
+stairs_railing,Stairs and railing,Building items,building,other,0,0,0,staircase|stairs|railing|handrail|banister,,,0
+heating_system,Heating system,Building items,building,other,0,0,0,radiator|baseboard heater|furnace|boiler|heat pump|ductwork|thermostat,,,0
+water_heater,Water heater,Building items,building,other,0,0,0,water heater|hot water tank|tankless water heater,,,0
+fireplace,Fireplace,Building items,building,other,0,0,0,fireplace|gas fireplace|fireplace insert|wood stove|mantel,,,0
