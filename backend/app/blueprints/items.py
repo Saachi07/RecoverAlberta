@@ -22,6 +22,7 @@ from flask import Blueprint, g, jsonify, request
 from ..auth import require_auth
 from ..extensions import service_client, user_client
 from ..pagination import parse_pagination
+from ..services.item_fields import WRITABLE, clean_item_row  # noqa: F401 (WRITABLE re-exported)
 
 bp = Blueprint("items", __name__)
 
@@ -43,23 +44,8 @@ case_bp = Blueprint("case_items", __name__, url_prefix="/cases/<case_id>/items")
 # User library
 lib_bp = Blueprint("user_items", __name__, url_prefix="/items")
 
-WRITABLE = {
-    "name",
-    "category",
-    "material",
-    "estimated_value",
-    "damage_type",
-    "damage_severity",
-    "confidence",
-    "image_url",
-    "before_url",
-    "after_url",
-    "receipts",
-    "description",
-    "room",
-    "purchase_date",
-    "case_id",
-}
+# WRITABLE and the validation for the evidence fields (migration 0012) live in
+# services/item_fields.py so the rules can be unit-tested without Flask.
 
 
 def _insert_item(sb, row):
@@ -99,7 +85,9 @@ def create_item_for_case(case_id: str):
     data = request.get_json(silent=True) or {}
     if not data.get("name"):
         return jsonify({"error": "name is required"}), 400
-    row = {k: v for k, v in data.items() if k in WRITABLE}
+    row, problem = clean_item_row(data)
+    if problem:
+        return jsonify({"error": problem}), 400
     row["case_id"] = case_id
     row["user_id"] = g.user_id
     sb = user_client(g.access_token)
@@ -127,7 +115,9 @@ def create_items_bulk(case_id: str):
     for it in items:
         if not isinstance(it, dict) or not it.get("name"):
             return jsonify({"error": "each item needs a name"}), 400
-        row = {k: v for k, v in it.items() if k in WRITABLE}
+        row, problem = clean_item_row(it)
+        if problem:
+            return jsonify({"error": f"item {len(rows) + 1}: {problem}"}), 400
         row["case_id"] = case_id
         row["user_id"] = g.user_id
         rows.append(row)
@@ -144,7 +134,9 @@ def create_items_bulk(case_id: str):
 @require_auth
 def update_item_for_case(case_id: str, item_id: str):
     data = request.get_json(silent=True) or {}
-    row = {k: v for k, v in data.items() if k in WRITABLE}
+    row, problem = clean_item_row(data)
+    if problem:
+        return jsonify({"error": problem}), 400
     if not row:
         return jsonify({"error": "no updatable fields provided"}), 400
     sb = user_client(g.access_token)
@@ -223,7 +215,9 @@ def create_library_item():
     data = request.get_json(silent=True) or {}
     if not data.get("name"):
         return jsonify({"error": "name is required"}), 400
-    row = {k: v for k, v in data.items() if k in WRITABLE}
+    row, problem = clean_item_row(data)
+    if problem:
+        return jsonify({"error": problem}), 400
     row["user_id"] = g.user_id
     # If the caller didn't pass case_id, the item lives in the library only.
     sb = user_client(g.access_token)
@@ -284,7 +278,9 @@ def upload_item_image():
 @require_auth
 def update_library_item(item_id: str):
     data = request.get_json(silent=True) or {}
-    row = {k: v for k, v in data.items() if k in WRITABLE}
+    row, problem = clean_item_row(data)
+    if problem:
+        return jsonify({"error": problem}), 400
     if not row:
         return jsonify({"error": "no updatable fields provided"}), 400
     sb = user_client(g.access_token)

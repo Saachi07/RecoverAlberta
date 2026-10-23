@@ -25,6 +25,11 @@ Disaster-recovery web app for Alberta (AI4Good Lab project). A user creates a ca
 - `legal.md`: design spec for replacing Gemini in document analysis (deadline engine, coverage composer, plain-language tiers, annotation, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_documents`, `document_pipeline`, `signals`, or `pdf_and_summary/`.
 - `inventory.md`: design spec for replacing Gemini in the photo inventory (taxonomy, detector, damage, salvage, pricing by comparables, pretrained models, data sources, CVAT and Label Studio workflow, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_inventory`, `blueprints/ml.py`, `blueprints/items.py`, `Inventory.tsx`, or `ml/`.
 
+## Inventory foundations (inventory.md s15, s5, s2)
+- `ml/classifier/splits.py` makes group-aware train/val/test splits (synthetic copies stay with their original; val/test real only) and writes `split_manifest.json`; `train.py` evaluates test once. Label fixes go in a `--overrides` CSV (`audit.py` produces review CSVs).
+- `backend/app/data/taxonomy_v1.csv` + `services/taxonomy.py`: leaf classes and whole-token lookup; `classify_claim_class` delegates to it. Lifespan, price source, and `reviewed` are blank until an insurance professional fills them.
+- Migration `0012_inventory_extras.sql` adds price range, basis, comparables, per-field confidence, taxonomy id, claim class, bulk, damage types, evidence, source to `case_items`. Validation: `services/item_fields.py`. Apply 0012 before any client sends these fields.
+
 ## Conventions
 - Warm, calm product voice; avoid dashes in user-facing copy. Contrast must stay WCAG AA (tokens in `styles.css`).
 - Forms use `components/forms/Field`, `PasswordChecklist`, `MissingList`: required marker, inline validation on blur, counters, disabled submit with a visible "what's left" list.
