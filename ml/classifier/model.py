@@ -10,7 +10,7 @@ the full model (or freeze the encoder — see train.py).
 
 from transformers import ViTForImageClassification, ViTImageProcessor
 
-from .dataset import ID2LABEL, LABEL2ID
+from .labels import ID2LABEL, LABEL2ID
 
 MODEL_NAME = "google/vit-base-patch16-224"
 

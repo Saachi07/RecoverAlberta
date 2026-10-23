@@ -8,7 +8,7 @@ The bounding boxes from Gemini are used to crop the item before calling this.
 import torch
 from PIL import Image
 
-from .dataset import ID2LABEL
+from .labels import ID2LABEL
 from .model import load_finetuned
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

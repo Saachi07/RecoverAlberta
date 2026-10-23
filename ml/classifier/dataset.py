@@ -1,78 +1,49 @@
 """
-Dataset loader for the fire damage classification dataset.
+Dataset loader for the damage classification dataset.
 
-Expected directory layout (relative to dataset_root):
-    chair_intact/                        → intact
-    chair_intact_synthetic/              → intact
-    chair_damaged/damaged/               → destroyed
-    chair_damaged/damaged_synthetic/     → destroyed
-    chair_damaged/salvageable/           → salvageable
-    chair_damaged/salvageable_synthetic/ → salvageable
-    table_intact/                        → intact (⚠ some filenames look damaged — verify)
-    table_damaged/damaged/               → destroyed
-    table_damaged/damaged_synthetic/     → destroyed
-    table_damaged/salvageable/           → salvageable
-    table_damaged/salvageable_synthetic/ → salvageable
+Labels and the folder map live in `labels.py`; leak-free splitting lives in
+`splits.py` (no torch there). This module only holds the torch Dataset and a
+thin `build_splits` wrapper kept for callers of the old API.
 """
 
-import os
-import random
 from pathlib import Path
+from typing import Optional
 
 from PIL import Image
 from torch.utils.data import Dataset
 
-LABEL2ID = {"intact": 0, "salvageable": 1, "destroyed": 2}
-ID2LABEL = {v: k for k, v in LABEL2ID.items()}
-
-# Maps each subfolder path (relative to dataset_root) to its class label.
-# Adjust or extend this if more item types are added.
-FOLDER_LABEL_MAP = {
-    "chair_intact": "intact",
-    "chair_intact_synthetic": "intact",
-    "chair_damaged/damaged": "destroyed",
-    "chair_damaged/damaged_synthetic": "destroyed",
-    "chair_damaged/salvageable": "salvageable",
-    "chair_damaged/salvageable_synthetic": "salvageable",
-    # TODO: audit table_intact — a few filenames suggest misplaced damaged images
-    "table_intact": "intact",
-    "table_damaged/damaged": "destroyed",
-    "table_damaged/damaged_synthetic": "destroyed",
-    "table_damaged/salvageable": "salvageable",
-    "table_damaged/salvageable_synthetic": "salvageable",
-}
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-
-
-def _collect_samples(dataset_root: str) -> list[tuple[str, int]]:
-    """Walk FOLDER_LABEL_MAP and return (image_path, label_id) pairs."""
-    root = Path(dataset_root)
-    samples = []
-
-    for rel_folder, label_str in FOLDER_LABEL_MAP.items():
-        folder = root / rel_folder
-        if not folder.exists():
-            continue
-        label_id = LABEL2ID[label_str]
-        for f in folder.iterdir():
-            if f.suffix.lower() in IMAGE_EXTENSIONS:
-                samples.append((str(f), label_id))
-
-    return samples
+from .labels import FOLDER_LABEL_MAP, ID2LABEL, IMAGE_EXTENSIONS, LABEL2ID  # noqa: F401
+from .splits import make_splits, samples_for, write_manifest
 
 
 def build_splits(
     dataset_root: str,
-    val_ratio: float = 0.2,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
     seed: int = 42,
-) -> tuple[list, list]:
-    """Return (train_samples, val_samples) as lists of (path, label_id)."""
-    samples = _collect_samples(dataset_root)
-    random.seed(seed)
-    random.shuffle(samples)
-    split = int(len(samples) * (1 - val_ratio))
-    return samples[:split], samples[split:]
+    manifest_path: Optional[str] = None,
+    overrides_path: Optional[str] = None,
+    hash_threshold: int = 10,
+) -> tuple[list, list, list]:
+    """Return (train, val, test) as lists of (path, label_id).
+
+    Splits whole source-image groups, so a synthetic variant never sits across
+    a split from its original. Val and test are real images only. Pass
+    `manifest_path` to record group, split, and provenance for every sample.
+    """
+    manifest = make_splits(
+        dataset_root,
+        val_ratio=val_ratio,
+        test_ratio=test_ratio,
+        seed=seed,
+        hash_threshold=hash_threshold,
+        overrides_path=overrides_path,
+    )
+    if manifest_path:
+        write_manifest(manifest, manifest_path)
+    for w in manifest["meta"]["warnings"]:
+        print(f"[splits] warning: {w}")
+    return tuple(samples_for(manifest, sp, dataset_root) for sp in ("train", "val", "test"))
 
 
 class DamageDataset(Dataset):
