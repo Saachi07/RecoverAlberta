@@ -1,6 +1,6 @@
 # CLAUDE.md: Rebuildr orientation
 
-Disaster-recovery web app for Alberta (AI4Good Lab project). A user creates a case after a disaster, scans rooms into an inventory with estimated values, uploads insurance documents for plain-language summaries and deadlines, and gets a recommended list of recovery programs.
+Disaster-recovery web app for Alberta (AI4Good Lab project). A user creates a case after a disaster, scans rooms into an inventory with estimated values, uploads insurance documents for plain-language summaries and deadlines, and gets a recommended list of recovery programs. Being renamed RecoverAlberta (code, repo, and this file still say Rebuildr until the rename lands).
 
 ## Layout
 - `frontend/`: React 18 + TypeScript + Vite + react-router. `src/pages` (screens), `src/components` (incl. `claim/`, `analysis/`, `forms/`), `src/lib` (helpers, `validation.ts`), `src/api.ts` (all backend calls), `src/auth` (Supabase auth; demo mode via `VITE_DISABLE_AUTH`), `src/pages/legal` + `src/legal/business.ts` (legal pages and operator details). Tests: `npm test` (vitest).
@@ -21,6 +21,10 @@ Disaster-recovery web app for Alberta (AI4Good Lab project). A user creates a ca
 - Recommendations: `GET/POST /cases/<id>/recommendations` using case tags, inventory and document signals.
 - Terms: `GET /terms`, `/terms/status`, `/terms/accept`. Bump `CURRENT_TERMS_VERSION` (backend/app/blueprints/terms.py) and `BUSINESS.legalVersion` together to force re-acceptance.
 
+## Specs
+- `legal.md`: design spec for replacing Gemini in document analysis (deadline engine, coverage composer, plain-language tiers, annotation, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_documents`, `document_pipeline`, `signals`, or `pdf_and_summary/`.
+- `inventory.md`: design spec for replacing Gemini in the photo inventory (taxonomy, detector, damage, salvage, pricing by comparables, pretrained models, data sources, CVAT and Label Studio workflow, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_inventory`, `blueprints/ml.py`, `blueprints/items.py`, `Inventory.tsx`, or `ml/`.
+
 ## Conventions
 - Warm, calm product voice; avoid dashes in user-facing copy. Contrast must stay WCAG AA (tokens in `styles.css`).
 - Forms use `components/forms/Field`, `PasswordChecklist`, `MissingList`: required marker, inline validation on blur, counters, disabled submit with a visible "what's left" list.
@@ -32,5 +36,5 @@ Commit `ed67c72` ("Initial commit for new repo") merged service modules into one
 ## Open items
 - Fill `src/legal/business.ts` (operator name, mailing address, confirm contact mailbox/domain). Have a lawyer review the legal pages.
 - Set Supabase Auth password policy to min 8 chars (client checks are not enforcement).
-- Plan: more Gemini-driven logic, local/Colab model training (see `ml/`), dataset split leakage and `table_intact` audit before trusting classifier metrics.
+- Plan: more Gemini-driven logic, local/Colab model training (see `ml/`), dataset split leakage and `table_intact` audit before trusting classifier metrics. Document analysis and the photo inventory are moving off Gemini instead; see `legal.md` and `inventory.md`. First step for the classifier: fix the train/val split (synthetic copies leak across it) and audit `table_intact` (`inventory.md` section 15).
 - No phone field exists; `lib/validation.ts` has `phoneToE164` ready if one is added.
