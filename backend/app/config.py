@@ -27,6 +27,12 @@ class Config:
     SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
 
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", "saachi@ualberta.ca")       #change email with domain email
+    MAIL_SERVER = os.environ.get("MAIL_SERVER")
+    MAIL_PORT = int(os.environ.get("MAIL_PORT", 587))
+    MAIL_USE_TLS = os.environ.get("MAIL_USE_TLS", "True").lower() == "true"
+    MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
+    MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
 
     # Browser origins allowed to call this API. A wildcard with credentials is
     # unsafe, so we pin known origins. Defaults cover local Vite dev; set

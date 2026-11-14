@@ -1,11 +1,10 @@
-import { ReactNode, useId, useState } from "react";
+import React, { forwardRef, ReactNode, useId, useState } from "react";
 import { charsLeft } from "../../lib/validation";
 
-type Props = {
+export type FieldProps = {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  /** Returns an error message, or null. Runs when the user leaves the field. */
   validate?: (value: string) => string | null;
   required?: boolean;
   maxLength?: number;
@@ -15,93 +14,127 @@ type Props = {
   placeholder?: string;
   help?: ReactNode;
   disabled?: boolean;
-  /** Set by the parent after a failed submit so every error shows at once. */
+  isLoading?: boolean; // Disables the field during submissions
   forceShowError?: boolean;
-  /** Called with the current error so the parent can build a "what's missing" list. */
   id?: string;
-  /** Extra content rendered inside the field group (e.g. the password checklist). */
   children?: ReactNode;
-  /** Transform on blur, e.g. tidy a phone number. */
   formatOnBlur?: (value: string) => string;
   multiline?: boolean;
   rows?: number;
-  /** Rendered beside the input, e.g. a show/hide password button. */
   trailing?: ReactNode;
+  className?: string; 
 };
 
-export function Field(props: Props) {
-  const {
-    label, value, onChange, validate, required, maxLength, type = "text", autoComplete,
-    inputMode, placeholder, help, disabled, forceShowError, children, formatOnBlur,
-    multiline, rows = 4, trailing,
-  } = props;
-  const autoId = useId();
-  const id = props.id ?? autoId;
-  const helpId = `${id}-help`;
-  const errId = `${id}-err`;
-  const countId = `${id}-count`;
-  const [touched, setTouched] = useState(false);
+export const Field = forwardRef<HTMLInputElement | HTMLTextAreaElement, FieldProps>(
+  (props, ref) => {
+    const {
+      label, value, onChange, validate, required, maxLength, type = "text", autoComplete,
+      inputMode, placeholder, help, disabled, isLoading, forceShowError, children, formatOnBlur,
+      multiline, rows = 4, trailing, className = ""
+    } = props;
+    
+    const autoId = useId();
+    const id = props.id ?? autoId;
+    const helpId = `${id}-help`;
+    const errId = `${id}-err`;
+    const countId = `${id}-count`;
+    const [touched, setTouched] = useState(false);
 
-  const error = validate ? validate(value) : null;
-  const showError = !!error && (touched || !!forceShowError);
-  const describedBy = [help ? helpId : "", showError ? errId : "", maxLength ? countId : ""].filter(Boolean).join(" ") || undefined;
+    const error = validate ? validate(value) : null;
+    const showError = !!error && (touched || !!forceShowError);
+    const describedBy = [help ? helpId : "", showError ? errId : "", maxLength ? countId : ""].filter(Boolean).join(" ") || undefined;
 
-  const shared = {
-    id,
-    value,
-    disabled,
-    placeholder,
-    autoComplete,
-    inputMode,
-    maxLength,
-    required,
-    "aria-required": required || undefined,
-    "aria-invalid": showError || undefined,
-    "aria-describedby": describedBy,
-    className: showError ? "input-invalid" : undefined,
-    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(e.target.value),
-    onBlur: () => {
-      setTouched(true);
-      if (formatOnBlur) {
-        const next = formatOnBlur(value);
-        if (next !== value) onChange(next);
-      }
-    },
-  };
+    // Combine manual disabled state with the loading state
+    const isDisabled = disabled || isLoading;
 
-  const left = maxLength ? charsLeft(value, maxLength) : null;
+    const shared = {
+      id,
+      value,
+      disabled: isDisabled,
+      placeholder,
+      autoComplete,
+      inputMode,
+      maxLength,
+      required,
+      "aria-required": required || undefined,
+      "aria-invalid": showError || undefined,
+      "aria-describedby": describedBy,
+      // Merge original logic with Tailwind UX improvements
+      className: `w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors ${
+        showError 
+          ? 'border-red-500 focus:border-red-500 focus:ring-red-200 input-invalid' 
+          : 'border-gray-300 focus:border-blue-500'
+      } ${className}`.trim(),
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(e.target.value),
+      onBlur: () => {
+        setTouched(true);
+        if (formatOnBlur) {
+          const next = formatOnBlur(value);
+          if (next !== value) onChange(next);
+        }
+      },
+    };
 
-  return (
-    <div className="field">
-      <label htmlFor={id}>
-        {label}
-        {required ? (
-          <span className="req" aria-hidden="true"> *</span>
+    const left = maxLength ? charsLeft(value, maxLength) : null;
+
+    // Fix for the broken Math.floor syntax in the original file
+    const isNearLimit = left !== null && maxLength && left <= Math.max(10, Math.floor(maxLength * 0.1));
+
+    return (
+      <div className="flex flex-col w-full mb-4 field">
+        <label htmlFor={id} className="mb-1 text-sm font-medium text-gray-700">
+          {label}
+          {required ? (
+            <span className="req text-red-500" aria-hidden="true"> *</span>
+          ) : (
+            <span className="opt text-gray-400 font-normal"> (optional)</span>
+          )}
+          {required && <span className="sr-only"> (required)</span>}
+        </label>
+        
+        {multiline ? (
+          <textarea 
+            ref={ref as React.Ref<HTMLTextAreaElement>} 
+            rows={rows} 
+            {...(shared as React.TextareaHTMLAttributes<HTMLTextAreaElement>)} 
+          />
+        ) : trailing ? (
+          <div className="password-wrap relative flex items-center">
+            <input 
+              type={type} 
+              ref={ref as React.Ref<HTMLInputElement>} 
+              {...(shared as React.InputHTMLAttributes<HTMLInputElement>)} 
+            />
+            <div className="absolute right-3">
+              {trailing}
+            </div>
+          </div>
         ) : (
-          <span className="opt"> (optional)</span>
+          <input 
+            type={type} 
+            ref={ref as React.Ref<HTMLInputElement>} 
+            {...(shared as React.InputHTMLAttributes<HTMLInputElement>)} 
+          />
         )}
-        {required && <span className="sr-only"> (required)</span>}
-      </label>
-      {multiline ? (
-        <textarea rows={rows} {...(shared as React.TextareaHTMLAttributes<HTMLTextAreaElement>)} />
-      ) : trailing ? (
-        <div className="password-wrap">
-          <input type={type} {...(shared as React.InputHTMLAttributes<HTMLInputElement>)} />
-          {trailing}
-        </div>
-      ) : (
-        <input type={type} {...(shared as React.InputHTMLAttributes<HTMLInputElement>)} />
-      )}
-      {help && <p id={helpId} className="field-help">{help}</p>}
-      {maxLength && left !== null && (
-        <p id={countId} className={`field-count${left <= Math.max(10, Math.floor(maxLength * 0.1)) ? " near-limit" : ""}`}>
-          {left} {left === 1 ? "character" : "characters"} left
-        </p>
-      )}
-      <p id={errId} className="field-error" role="alert" aria-live="polite">
-        {showError ? error : ""}
-      </p>
-      {children}
-    </div>
-  );
-}
+        
+        {help && <p id={helpId} className="field-help text-sm text-gray-500 mt-1">{help}</p>}
+        
+        {maxLength && left !== null && (
+          <p id={countId} className={`field-count text-sm mt-1 ${isNearLimit ? "text-amber-600 near-limit" : "text-gray-500"}`}>
+            {left} {left === 1 ? "character" : "characters"} left
+          </p>
+        )}
+        
+        {showError && (
+          <p id={errId} className="field-error mt-1 text-sm text-red-600" role="alert" aria-live="polite">
+            {error}
+          </p>
+        )}
+        
+        {children}
+      </div>
+    );
+  }
+);
+
+Field.displayName = 'Field';

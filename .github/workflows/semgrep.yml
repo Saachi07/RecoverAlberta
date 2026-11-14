@@ -1,0 +1,19 @@
+name: Semgrep Security Scan
+on:
+  push:
+    branches: ["fixes", "main"]
+  pull_request:
+    branches: ["fixes", "main"]
+jobs:
+  semgrep:
+    name: Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/ci
+            p/python
+            p/typescript
+            p/react

@@ -1,3 +1,14 @@
+import os
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN"),
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0,
+    environment=os.environ.get("FLASK_ENV", "production")
+)
+
 from flask import Flask, jsonify, request
 from flask_compress import Compress
 from flask_cors import CORS

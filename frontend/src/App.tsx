@@ -33,6 +33,7 @@ import { useStartRecovery } from "./lib/useStartRecovery";
 import { useDismissable } from "./lib/useDismissable";
 import { api } from "./api";
 import { isAlertRelevantToLocation } from "./lib/regionMapping";
+import { CookieBanner } from './components/CookieBanner';
 
 type DerivedNotif = {
   id: string;
@@ -522,42 +523,59 @@ function Home() {
 
 export default function App() {
   const location = useLocation();
+  
   return (
     <CasesProvider>
       <PageBackProvider>
-      <ToastProvider>
-        <TermsGate>
-          <OfflineBanner />
-          <header className="site-header">
-            <Nav />
-            <ActionBar />
-          </header>
-          <ErrorBoundary routeKey={location.pathname}>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/emergency" element={<Emergency />} />
-            <Route path="/legal/terms" element={<Terms />} />
-            <Route path="/legal/privacy" element={<Privacy />} />
-            <Route path="/legal/cookies" element={<Cookies />} />
-            <Route path="/legal/refunds" element={<Refunds />} />
-            <Route path="/home" element={<Private><Home /></Private>} />
-            <Route path="/dashboard" element={<Private><Dashboard /></Private>} />
-            <Route path="/profile" element={<Private><Profile /></Private>} />
-            <Route path="/prepare" element={<Private><Prepare /></Private>} />
-            <Route path="/settings" element={<Private><Settings /></Private>} />
-            <Route path="/documents" element={<Private><Documents /></Private>} />
-            <Route path="/cases/new" element={<Private><NewCase /></Private>} />
-            <Route path="/cases/:id" element={<Private><CaseHub /></Private>} />
-            <Route path="/cases/:id/inventory" element={<Private><Inventory /></Private>} />
-            <Route path="/cases/:id/recommendations" element={<Private><Recommendations /></Private>} />
-            <Route path="*" element={<NotFound />} />
-            <Route path="/booth" element={<Presentation />} />
-          </Routes>
-          </ErrorBoundary>
-          <HelpFooter />
-          <MobileTabBar />
-        </TermsGate>
-      </ToastProvider>
+        <ToastProvider>
+          <TermsGate>
+            {/* 
+              The outer div ensures the page takes up the full screen height, 
+              pushing the footer to the bottom and keeping the layout structured.
+            */}
+            <div className="flex flex-col min-h-screen">
+              <OfflineBanner />
+              <header className="site-header">
+                <Nav />
+                <ActionBar />
+              </header>
+
+              <main className="flex-grow">
+                <ErrorBoundary routeKey={location.pathname}>
+                  <Routes>
+                    <Route path="/" element={<Landing />} />
+                    <Route path="/emergency" element={<Emergency />} />
+                    <Route path="/legal/terms" element={<Terms />} />
+                    <Route path="/legal/privacy" element={<Privacy />} />
+                    <Route path="/legal/cookies" element={<Cookies />} />
+                    <Route path="/legal/refunds" element={<Refunds />} />
+                    <Route path="/home" element={<Private><Home /></Private>} />
+                    <Route path="/dashboard" element={<Private><Dashboard /></Private>} />
+                    <Route path="/profile" element={<Private><Profile /></Private>} />
+                    <Route path="/prepare" element={<Private><Prepare /></Private>} />
+                    <Route path="/settings" element={<Private><Settings /></Private>} />
+                    <Route path="/documents" element={<Private><Documents /></Private>} />
+                    <Route path="/cases/new" element={<Private><NewCase /></Private>} />
+                    <Route path="/cases/:id" element={<Private><CaseHub /></Private>} />
+                    <Route path="/cases/:id/inventory" element={<Private><Inventory /></Private>} />
+                    <Route path="/cases/:id/recommendations" element={<Private><Recommendations /></Private>} />
+                    <Route path="*" element={<NotFound />} />
+                    <Route path="/booth" element={<Presentation />} />
+                  </Routes>
+                </ErrorBoundary>
+              </main>
+
+              <HelpFooter />
+              <MobileTabBar />
+              
+              {/* 
+                The CookieBanner is placed at the very bottom of the layout wrapper, 
+                outside the <main> routing block so it persists across all pages.
+              */}
+              <CookieBanner />
+            </div>
+          </TermsGate>
+        </ToastProvider>
       </PageBackProvider>
     </CasesProvider>
   );

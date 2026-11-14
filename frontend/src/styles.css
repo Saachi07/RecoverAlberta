@@ -1,7 +1,3 @@
-/* Warm, calm, reassuring palette for people rebuilding after a disaster.
-   Soft sand/cream background, warm charcoal-brown text, a steady warm-teal
-   accent, and a soft terracotta for destructive actions. Calm green for "ok",
-   warm amber for warnings (never alarm-red). Contrast meets WCAG AA. */
 :root {
   --bg: #faf6ef;            /* soft warm cream */
   --panel: #fffdf9;         /* near-white warm panel */
@@ -12,7 +8,7 @@
   --accent: #1b6f61;        /* reassuring warm teal */
   --accent-2: #155c50;      /* deeper teal for hover */
   --accent-soft: rgba(27, 111, 97, 0.12);
-  --danger: #b04e34;        /* soft terracotta, not alarm-red */
+  --danger: #b04e34;        /* soft terracotta*/
   --danger-text: #a8452e;
   --danger-soft: rgba(194, 90, 63, 0.1);
   --danger-border: rgba(194, 90, 63, 0.35);
@@ -328,6 +324,33 @@ label { display: block; font-size: 14px; color: var(--muted-strong); margin: 14p
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
 }
 .back-fab .back-btn:hover { background: var(--panel-2); color: var(--text); }
+
+body, #root {
+  text-align: left;
+  /* Ensure a minimum height for the application wrapper */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+/* Sticky Mobile CTA styling */
+.sticky-mobile-cta {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1rem;
+  background-color: white;
+  box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+}
+@media (min-width: 768px) {
+  .sticky-mobile-cta {
+    display: none;
+  }
+}
+
 @media (max-width: 700px) { .back-fab { left: 16px; } }
 /* Reserves room at the top of pages that have a back target so the floating
    button clears the page title. */
