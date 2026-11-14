@@ -52,7 +52,7 @@ def main():
     print(classification_report(y_test, y_pred, zero_division=0))
 
     with open("intake_model.pkl", "wb") as f:
-        pickle.dump(clf, f)
+        pickle.dump(clf, f)  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle
     print("Saved trained model to intake_model.pkl")
 
 

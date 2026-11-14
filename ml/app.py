@@ -130,4 +130,8 @@ def loss_report():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001, use_reloader=False)
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG", "False").lower() == "true", 
+        port=5001, 
+        use_reloader=False
+    )

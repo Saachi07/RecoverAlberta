@@ -688,9 +688,13 @@ class GeminiSummarizer:
         return result
 
     def _send_request(self, request: Request) -> dict[str, Any]:
+        url_string = request.full_url if hasattr(request, 'full_url') else request
+        if not str(url_string).startswith(('http://', 'https://')):
+            raise ValueError("Only HTTP/HTTPS protocols are permitted for security.")
+
         for attempt in range(self.max_retries + 1):
             try:
-                with urlopen(request, timeout=self.timeout) as response:
+                with urlopen(request, timeout=self.timeout) as response: # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
                     return json.loads(response.read().decode("utf-8"))
             except HTTPError as exc:
                 if exc.code not in RETRYABLE_HTTP_STATUS_CODES:

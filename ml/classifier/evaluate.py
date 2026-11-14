@@ -52,6 +52,7 @@ def evaluate(dataset_root: str, checkpoint_dir: str, batch_size: int = 16, force
         batch_size=batch_size,
         shuffle=False,
         num_workers=2,
+        pin_memory=True
     )
     y_true, y_pred, probs = predict_loader(model, loader)
     report = metrics.build_report(y_true, y_pred, probs, CLASS_NAMES)

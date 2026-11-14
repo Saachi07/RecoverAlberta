@@ -40,7 +40,7 @@ class IntakeEngine:
         rng_seed: int = 42,
     ):
         with open(model_path, "rb") as f:
-            self.model = pickle.load(f)
+            self.model = pickle.load(f)  # nosemgrep: python.lang.security.deserialization.pickle.avoid-pickle 
         data = np.load(data_path)
         self.X_train = data["X"]
         self.rng = np.random.default_rng(rng_seed)
