@@ -1,0 +1,1277 @@
+From 887b79e5096446f394e9c0fd88508d2fa6975fb5 Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Fri, 23 Oct 2026 02:00:38 +0000
+Subject: [PATCH 1/3] ml/classifier: leak-free group splits, split manifest,
+ held-out metrics, label audit tools
+
+- splits.py: group by source image (filename + mirror-invariant dHash, union-find), stratified group split, val/test real-only, synthetics of eval groups dropped
+- metrics.py: per-class P/R, confusion matrix, macro-F1, ECE
+- train.py: checkpoint by val macro-F1, test split evaluated once, writes eval_report.json and split_manifest.json
+- audit.py: table_intact review CSV, label conflicts, confident-wrong; fixes recorded via --overrides CSV
+- labels.py: torch-free label vocab; dataset.py keeps the Dataset only
+- tests: 23 cases
+---
+ ml/classifier/audit.py          | 149 ++++++++++++
+ ml/classifier/dataset.py        |  93 +++----
+ ml/classifier/labels.py         |  36 +++
+ ml/classifier/metrics.py        |  77 ++++++
+ ml/classifier/model.py          |   2 +-
+ ml/classifier/predict.py        |   2 +-
+ ml/classifier/splits.py         | 418 ++++++++++++++++++++++++++++++++
+ ml/classifier/train.py          | 100 ++++++--
+ tests/test_classifier_splits.py | 209 ++++++++++++++++
+ 9 files changed, 997 insertions(+), 89 deletions(-)
+ create mode 100644 ml/classifier/audit.py
+ create mode 100644 ml/classifier/labels.py
+ create mode 100644 ml/classifier/metrics.py
+ create mode 100644 ml/classifier/splits.py
+ create mode 100644 tests/test_classifier_splits.py
+
+diff --git a/ml/classifier/audit.py b/ml/classifier/audit.py
+new file mode 100644
+index 0000000..ac1f3a7
+--- /dev/null
++++ b/ml/classifier/audit.py
+@@ -0,0 +1,149 @@
++"""Label audit tools (inventory.md s15 step 3).
++
++    python -m classifier.audit table-intact --dataset D --out table_intact_review.csv
++    python -m classifier.audit conflicts --manifest checkpoints/split_manifest.json
++    python -m classifier.audit confident-wrong --dataset D --manifest M \
++        --checkpoint checkpoints --out confident_wrong.csv
++
++Workflow: review each CSV by hand, fill `new_label` (intact, salvageable,
++destroyed, or drop) and `note` for rows that are wrong, then copy those rows
++(rel_path,label,note) into label_overrides.csv and pass it to train with
++--overrides. Files never move; the override is the provenance record.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import re
++import sys
++from pathlib import Path
++
++from .labels import ID2LABEL, IMAGE_EXTENSIONS
++
++# Filename tokens that suggest damage. A hit in an "intact" folder is a
++# candidate mislabel, not proof: a human decides.
++SUSPECT_TOKENS = re.compile(
++    r"(damag|burn|burnt|fire|char|ash|soot|destroy|ruin|wreck|broken|salvage|"
++    r"melt|smok|flood|water)",
++    re.IGNORECASE,
++)
++
++REVIEW_FIELDS = ["rel_path", "reason", "current_label", "new_label", "note"]
++
++
++def _write_csv(path: str, rows: list[dict], fields: list[str]) -> None:
++    with open(path, "w", newline="", encoding="utf-8") as fh:
++        w = csv.DictWriter(fh, fieldnames=fields)
++        w.writeheader()
++        w.writerows(rows)
++    print(f"wrote {len(rows)} rows to {path}")
++
++
++def table_intact(dataset: str, out: str, include_all: bool) -> None:
++    root = Path(dataset)
++    folder = root / "table_intact"
++    if not folder.exists():
++        sys.exit(f"{folder} not found")
++    rows = []
++    for f in sorted(folder.iterdir()):
++        if f.suffix.lower() not in IMAGE_EXTENSIONS:
++            continue
++        m = SUSPECT_TOKENS.search(f.stem)
++        if m or include_all:
++            rows.append(
++                {
++                    "rel_path": f.relative_to(root).as_posix(),
++                    "reason": f"filename contains {m.group(0)!r}" if m else "full review",
++                    "current_label": "intact",
++                    "new_label": "",
++                    "note": "",
++                }
++            )
++    _write_csv(out, rows, REVIEW_FIELDS)
++
++
++def conflicts(manifest_path: str) -> None:
++    from .splits import load_manifest
++
++    m = load_manifest(manifest_path)
++    c = m["meta"]["label_conflicts"]
++    if not c:
++        print("no label conflicts")
++        return
++    for gid, members in sorted(c.items()):
++        print(gid)
++        for line in members:
++            print(f"  {line}")
++
++
++def confident_wrong(
++    dataset: str, manifest_path: str, checkpoint: str, out: str, min_conf: float
++) -> None:
++    import torch
++
++    from .model import load_finetuned
++    from .splits import load_manifest
++    from PIL import Image
++
++    model, processor = load_finetuned(checkpoint)
++    model.eval()
++    m = load_manifest(manifest_path)
++    root = Path(dataset)
++    rows = []
++    with torch.no_grad():
++        for e in m["entries"]:
++            if e["synthetic"]:
++                continue
++            img = Image.open(root / e["rel_path"]).convert("RGB")
++            logits = model(**processor(images=img, return_tensors="pt")).logits
++            probs = torch.softmax(logits, dim=-1)[0]
++            conf, idx = probs.max(dim=-1)
++            pred = ID2LABEL[int(idx)]
++            if pred != e["label"] and float(conf) >= min_conf:
++                rows.append(
++                    {
++                        "rel_path": e["rel_path"],
++                        "reason": f"model says {pred} ({float(conf):.2f}) in split {e['split']}",
++                        "current_label": e["label"],
++                        "new_label": "",
++                        "note": "",
++                    }
++                )
++    print(
++        "note: items in the train split were fit by the model, so disagreement "
++        "there is stronger evidence of a bad label than on val/test."
++    )
++    _write_csv(out, rows, REVIEW_FIELDS)
++
++
++def main() -> None:
++    ap = argparse.ArgumentParser()
++    sub = ap.add_subparsers(dest="cmd", required=True)
++
++    a = sub.add_parser("table-intact")
++    a.add_argument("--dataset", required=True)
++    a.add_argument("--out", default="table_intact_review.csv")
++    a.add_argument("--all", action="store_true", help="list every file, not just name hits")
++
++    b = sub.add_parser("conflicts")
++    b.add_argument("--manifest", required=True)
++
++    c = sub.add_parser("confident-wrong")
++    c.add_argument("--dataset", required=True)
++    c.add_argument("--manifest", required=True)
++    c.add_argument("--checkpoint", required=True)
++    c.add_argument("--out", default="confident_wrong.csv")
++    c.add_argument("--min-conf", type=float, default=0.9)
++
++    args = ap.parse_args()
++    if args.cmd == "table-intact":
++        table_intact(args.dataset, args.out, args.all)
++    elif args.cmd == "conflicts":
++        conflicts(args.manifest)
++    else:
++        confident_wrong(args.dataset, args.manifest, args.checkpoint, args.out, args.min_conf)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/ml/classifier/dataset.py b/ml/classifier/dataset.py
+index bf5d7f6..529d21a 100644
+--- a/ml/classifier/dataset.py
++++ b/ml/classifier/dataset.py
+@@ -1,78 +1,49 @@
+ """
+-Dataset loader for the fire damage classification dataset.
++Dataset loader for the damage classification dataset.
+ 
+-Expected directory layout (relative to dataset_root):
+-    chair_intact/                        → intact
+-    chair_intact_synthetic/              → intact
+-    chair_damaged/damaged/               → destroyed
+-    chair_damaged/damaged_synthetic/     → destroyed
+-    chair_damaged/salvageable/           → salvageable
+-    chair_damaged/salvageable_synthetic/ → salvageable
+-    table_intact/                        → intact (⚠ some filenames look damaged — verify)
+-    table_damaged/damaged/               → destroyed
+-    table_damaged/damaged_synthetic/     → destroyed
+-    table_damaged/salvageable/           → salvageable
+-    table_damaged/salvageable_synthetic/ → salvageable
++Labels and the folder map live in `labels.py`; leak-free splitting lives in
++`splits.py` (no torch there). This module only holds the torch Dataset and a
++thin `build_splits` wrapper kept for callers of the old API.
+ """
+ 
+-import os
+-import random
+ from pathlib import Path
++from typing import Optional
+ 
+ from PIL import Image
+ from torch.utils.data import Dataset
+ 
+-LABEL2ID = {"intact": 0, "salvageable": 1, "destroyed": 2}
+-ID2LABEL = {v: k for k, v in LABEL2ID.items()}
+-
+-# Maps each subfolder path (relative to dataset_root) to its class label.
+-# Adjust or extend this if more item types are added.
+-FOLDER_LABEL_MAP = {
+-    "chair_intact": "intact",
+-    "chair_intact_synthetic": "intact",
+-    "chair_damaged/damaged": "destroyed",
+-    "chair_damaged/damaged_synthetic": "destroyed",
+-    "chair_damaged/salvageable": "salvageable",
+-    "chair_damaged/salvageable_synthetic": "salvageable",
+-    # TODO: audit table_intact — a few filenames suggest misplaced damaged images
+-    "table_intact": "intact",
+-    "table_damaged/damaged": "destroyed",
+-    "table_damaged/damaged_synthetic": "destroyed",
+-    "table_damaged/salvageable": "salvageable",
+-    "table_damaged/salvageable_synthetic": "salvageable",
+-}
+-
+-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+-
+-
+-def _collect_samples(dataset_root: str) -> list[tuple[str, int]]:
+-    """Walk FOLDER_LABEL_MAP and return (image_path, label_id) pairs."""
+-    root = Path(dataset_root)
+-    samples = []
+-
+-    for rel_folder, label_str in FOLDER_LABEL_MAP.items():
+-        folder = root / rel_folder
+-        if not folder.exists():
+-            continue
+-        label_id = LABEL2ID[label_str]
+-        for f in folder.iterdir():
+-            if f.suffix.lower() in IMAGE_EXTENSIONS:
+-                samples.append((str(f), label_id))
+-
+-    return samples
++from .labels import FOLDER_LABEL_MAP, ID2LABEL, IMAGE_EXTENSIONS, LABEL2ID  # noqa: F401
++from .splits import make_splits, samples_for, write_manifest
+ 
+ 
+ def build_splits(
+     dataset_root: str,
+-    val_ratio: float = 0.2,
++    val_ratio: float = 0.15,
++    test_ratio: float = 0.15,
+     seed: int = 42,
+-) -> tuple[list, list]:
+-    """Return (train_samples, val_samples) as lists of (path, label_id)."""
+-    samples = _collect_samples(dataset_root)
+-    random.seed(seed)
+-    random.shuffle(samples)
+-    split = int(len(samples) * (1 - val_ratio))
+-    return samples[:split], samples[split:]
++    manifest_path: Optional[str] = None,
++    overrides_path: Optional[str] = None,
++    hash_threshold: int = 10,
++) -> tuple[list, list, list]:
++    """Return (train, val, test) as lists of (path, label_id).
++
++    Splits whole source-image groups, so a synthetic variant never sits across
++    a split from its original. Val and test are real images only. Pass
++    `manifest_path` to record group, split, and provenance for every sample.
++    """
++    manifest = make_splits(
++        dataset_root,
++        val_ratio=val_ratio,
++        test_ratio=test_ratio,
++        seed=seed,
++        hash_threshold=hash_threshold,
++        overrides_path=overrides_path,
++    )
++    if manifest_path:
++        write_manifest(manifest, manifest_path)
++    for w in manifest["meta"]["warnings"]:
++        print(f"[splits] warning: {w}")
++    return tuple(samples_for(manifest, sp, dataset_root) for sp in ("train", "val", "test"))
+ 
+ 
+ class DamageDataset(Dataset):
+diff --git a/ml/classifier/labels.py b/ml/classifier/labels.py
+new file mode 100644
+index 0000000..090a5f8
+--- /dev/null
++++ b/ml/classifier/labels.py
+@@ -0,0 +1,36 @@
++"""Label vocabulary and folder map for the damage classifier.
++
++Kept free of torch so the split tooling and tests can import it anywhere.
++
++Expected directory layout (relative to dataset_root):
++    chair_intact/                        -> intact
++    chair_intact_synthetic/              -> intact
++    chair_damaged/damaged/               -> destroyed
++    chair_damaged/damaged_synthetic/     -> destroyed
++    chair_damaged/salvageable/           -> salvageable
++    chair_damaged/salvageable_synthetic/ -> salvageable
++    table_intact/                        -> intact (audit pending, see audit.py)
++    table_damaged/...                    -> same pattern as chair_damaged
++"""
++
++LABEL2ID = {"intact": 0, "salvageable": 1, "destroyed": 2}
++ID2LABEL = {v: k for k, v in LABEL2ID.items()}
++
++# Maps each subfolder (relative to dataset_root) to its class label.
++FOLDER_LABEL_MAP = {
++    "chair_intact": "intact",
++    "chair_intact_synthetic": "intact",
++    "chair_damaged/damaged": "destroyed",
++    "chair_damaged/damaged_synthetic": "destroyed",
++    "chair_damaged/salvageable": "salvageable",
++    "chair_damaged/salvageable_synthetic": "salvageable",
++    # Audit pending: run `python -m classifier.audit table-intact`, review the
++    # CSV by hand, and record fixes in label_overrides.csv (see splits.py).
++    "table_intact": "intact",
++    "table_damaged/damaged": "destroyed",
++    "table_damaged/damaged_synthetic": "destroyed",
++    "table_damaged/salvageable": "salvageable",
++    "table_damaged/salvageable_synthetic": "salvageable",
++}
++
++IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+diff --git a/ml/classifier/metrics.py b/ml/classifier/metrics.py
+new file mode 100644
+index 0000000..fd85f29
+--- /dev/null
++++ b/ml/classifier/metrics.py
+@@ -0,0 +1,77 @@
++"""Held-out evaluation metrics (numpy only): per-class precision and recall,
++confusion matrix, macro-F1, and expected calibration error."""
++
++from __future__ import annotations
++
++import numpy as np
++
++from .labels import ID2LABEL
++
++
++def confusion_matrix(y_true, y_pred, n_classes: int) -> np.ndarray:
++    cm = np.zeros((n_classes, n_classes), dtype=int)
++    for t, p in zip(y_true, y_pred):
++        cm[int(t), int(p)] += 1
++    return cm
++
++
++def per_class_prf(cm: np.ndarray) -> list[dict]:
++    rows = []
++    for i in range(cm.shape[0]):
++        tp = int(cm[i, i])
++        fp = int(cm[:, i].sum() - tp)
++        fn = int(cm[i, :].sum() - tp)
++        p = tp / (tp + fp) if tp + fp else 0.0
++        r = tp / (tp + fn) if tp + fn else 0.0
++        f1 = 2 * p * r / (p + r) if p + r else 0.0
++        rows.append(
++            {
++                "class": ID2LABEL.get(i, str(i)),
++                "precision": round(p, 4),
++                "recall": round(r, 4),
++                "f1": round(f1, 4),
++                "support": int(cm[i, :].sum()),
++            }
++        )
++    return rows
++
++
++def expected_calibration_error(probs: np.ndarray, y_true, n_bins: int = 10) -> float:
++    """Top-label ECE: weighted gap between confidence and accuracy per bin."""
++    probs = np.asarray(probs, dtype=float)
++    y_true = np.asarray(y_true)
++    if len(y_true) == 0:
++        return 0.0
++    conf = probs.max(axis=1)
++    correct = (probs.argmax(axis=1) == y_true).astype(float)
++    edges = np.linspace(0.0, 1.0, n_bins + 1)
++    ece = 0.0
++    for lo, hi in zip(edges[:-1], edges[1:]):
++        mask = (conf > lo) & (conf <= hi)
++        if mask.any():
++            ece += mask.mean() * abs(correct[mask].mean() - conf[mask].mean())
++    return float(ece)
++
++
++def macro_f1(y_true, y_pred, n_classes: int) -> float:
++    rows = per_class_prf(confusion_matrix(y_true, y_pred, n_classes))
++    return float(np.mean([r["f1"] for r in rows])) if rows else 0.0
++
++
++def build_report(probs: np.ndarray, y_true) -> dict:
++    probs = np.asarray(probs, dtype=float)
++    y_true = np.asarray(y_true)
++    n_classes = probs.shape[1]
++    y_pred = probs.argmax(axis=1)
++    cm = confusion_matrix(y_true, y_pred, n_classes)
++    return {
++        "n": int(len(y_true)),
++        "accuracy": round(float((y_pred == y_true).mean()), 4) if len(y_true) else 0.0,
++        "macro_f1": round(macro_f1(y_true, y_pred, n_classes), 4),
++        "per_class": per_class_prf(cm),
++        "confusion_matrix": {
++            "labels": [ID2LABEL.get(i, str(i)) for i in range(n_classes)],
++            "rows_are_true": cm.tolist(),
++        },
++        "ece": round(expected_calibration_error(probs, y_true), 4),
++    }
+diff --git a/ml/classifier/model.py b/ml/classifier/model.py
+index 1e92b4e..14e23f6 100644
+--- a/ml/classifier/model.py
++++ b/ml/classifier/model.py
+@@ -10,7 +10,7 @@ the full model (or freeze the encoder — see train.py).
+ 
+ from transformers import ViTForImageClassification, ViTImageProcessor
+ 
+-from .dataset import ID2LABEL, LABEL2ID
++from .labels import ID2LABEL, LABEL2ID
+ 
+ MODEL_NAME = "google/vit-base-patch16-224"
+ 
+diff --git a/ml/classifier/predict.py b/ml/classifier/predict.py
+index 53e1184..6bef5d6 100644
+--- a/ml/classifier/predict.py
++++ b/ml/classifier/predict.py
+@@ -8,7 +8,7 @@ The bounding boxes from Gemini are used to crop the item before calling this.
+ import torch
+ from PIL import Image
+ 
+-from .dataset import ID2LABEL
++from .labels import ID2LABEL
+ from .model import load_finetuned
+ 
+ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+diff --git a/ml/classifier/splits.py b/ml/classifier/splits.py
+new file mode 100644
+index 0000000..7e37b58
+--- /dev/null
++++ b/ml/classifier/splits.py
+@@ -0,0 +1,418 @@
++"""Leak-free train/val/test splits for the damage classifier (inventory.md s15).
++
++The old `build_splits` shuffled every file together, so a `_synthetic` variant
++of an image could sit in train while its original sat in val. This module:
++
++1. Collects samples with provenance (folder, synthetic or real, label source).
++2. Groups samples that come from the same source image: first by normalized
++   filename (synthetic and augmentation markers stripped), then by perceptual
++   hash across the whole pool (mirror-invariant), merged with union-find.
++3. Splits whole groups, stratified by label, with a fixed seed.
++4. Keeps val and test 100 percent real. Synthetic variants of a group that
++   lands in val or test are dropped, not trained on. Groups with no real image
++   go to train.
++5. Writes a manifest (JSON) so every sample's group, split, and provenance is
++   recorded instead of living in folder names.
++
++No torch import: usable from tests, audits, and notebooks.
++
++Limits: the name and hash heuristics catch re-encodes, flips, and light edits.
++Heavy augmentation (large crops, colour changes) can slip past a 64-bit hash.
++If the manifest report shows suspiciously high val accuracy, add an embedding
++similarity pass before trusting it.
++"""
++
++from __future__ import annotations
++
++import csv
++import json
++import random
++import re
++from collections import Counter, defaultdict
++from dataclasses import asdict, dataclass, field
++from pathlib import Path
++from typing import Iterable, Optional
++
++from .labels import FOLDER_LABEL_MAP, IMAGE_EXTENSIONS, LABEL2ID
++
++SPLITS = ("train", "val", "test")
++DROPPED = "dropped"
++DROP_LABEL = "drop"  # override label that removes a sample entirely
++
++# Tokens that mark a file as a derived copy of another image. Matched only
++# when delimited by _ - space or string edges, so "synergy" is untouched.
++_DERIVED_TOKENS = (
++    "synthetic|synth|syn|augmented|aug|copy|flip|flipped|mirror|mirrored|"
++    "rot|rotate|rotated|bright|brighter|dark|darker|noise|noisy|blur|blurred|"
++    "crop|cropped|zoom|jitter"
++)
++_DERIVED_RE = re.compile(
++    rf"(?:^|[_\-\s])(?:{_DERIVED_TOKENS})(?:[_\-\s]?\d+)?(?=$|[_\-\s])",
++    re.IGNORECASE,
++)
++_COPY_SUFFIX_RE = re.compile(r"\s*\(\d+\)$")
++
++
++def source_key(stem: str) -> str:
++    """Filename stem with derived-copy markers removed.
++
++    "chair_12_synthetic_3" -> "chair_12"; "chair_12_flip" -> "chair_12".
++    """
++    s = stem.lower()
++    prev = None
++    while prev != s:  # markers can stack: chair_12_aug3_flip
++        prev = s
++        s = _DERIVED_RE.sub("", s)
++        s = _COPY_SUFFIX_RE.sub("", s)
++    s = s.strip(" _-")
++    return s or stem.lower()
++
++
++@dataclass
++class Sample:
++    rel_path: str  # posix, relative to dataset_root
++    label: str
++    folder: str
++    item_type: str
++    synthetic: bool
++    label_source: str = "folder"  # folder | override
++    group: str = ""
++    split: str = ""
++    phash: Optional[str] = None  # hex, for the manifest
++
++    def abs_path(self, root: str | Path) -> str:
++        return str(Path(root) / self.rel_path)
++
++
++# ---------------------------------------------------------------- collection
++
++
++def load_overrides(path: str | Path) -> dict[str, str]:
++    """CSV with columns rel_path,label[,note]. label is a class or "drop"."""
++    out: dict[str, str] = {}
++    with open(path, newline="", encoding="utf-8") as fh:
++        for row in csv.DictReader(fh):
++            rel = (row.get("rel_path") or "").strip().replace("\\", "/")
++            label = (row.get("label") or "").strip().lower()
++            if not rel:
++                continue
++            if label != DROP_LABEL and label not in LABEL2ID:
++                raise ValueError(f"override for {rel!r} has unknown label {label!r}")
++            out[rel] = label
++    return out
++
++
++def collect_samples(
++    dataset_root: str | Path,
++    overrides: Optional[dict[str, str]] = None,
++) -> list[Sample]:
++    root = Path(dataset_root)
++    overrides = overrides or {}
++    samples: list[Sample] = []
++    for rel_folder in sorted(FOLDER_LABEL_MAP):
++        folder = root / rel_folder
++        if not folder.exists():
++            continue
++        folder_label = FOLDER_LABEL_MAP[rel_folder]
++        synthetic = "synthetic" in rel_folder.lower()
++        item_type = rel_folder.split("/")[0].split("_")[0]
++        for f in sorted(folder.iterdir()):
++            if f.suffix.lower() not in IMAGE_EXTENSIONS:
++                continue
++            rel = f.relative_to(root).as_posix()
++            label, src = folder_label, "folder"
++            if rel in overrides:
++                if overrides[rel] == DROP_LABEL:
++                    continue
++                label, src = overrides[rel], "override"
++            samples.append(
++                Sample(
++                    rel_path=rel,
++                    label=label,
++                    folder=rel_folder,
++                    item_type=item_type,
++                    synthetic=synthetic,
++                    label_source=src,
++                )
++            )
++    return samples
++
++
++# ------------------------------------------------------------------- hashing
++
++_MIN_STD = 4.0  # near-uniform images all hash alike; do not link on them
++
++
++def dhash_pair(path: str, size: int = 8) -> Optional[tuple[int, int]]:
++    """64-bit difference hash of the image and of its horizontal mirror.
++
++    Returns None if the file cannot be read or is near-uniform.
++    """
++    try:
++        import numpy as np
++        from PIL import Image, ImageOps
++
++        with Image.open(path) as im:
++            im = ImageOps.exif_transpose(im).convert("L")
++            small = im.resize((size + 1, size), Image.LANCZOS)
++        arr = np.asarray(small, dtype=np.float32)
++        if float(arr.std()) < _MIN_STD:
++            return None
++
++        def bits(a) -> int:
++            diff = a[:, 1:] > a[:, :-1]
++            value = 0
++            for b in diff.flatten():
++                value = (value << 1) | int(b)
++            return value
++
++        return bits(arr), bits(arr[:, ::-1])
++    except Exception:  # noqa: BLE001 - unreadable file is reported, not fatal
++        return None
++
++
++def _popcount(x: int) -> int:
++    return bin(x).count("1")
++
++
++class _UnionFind:
++    def __init__(self, n: int):
++        self.parent = list(range(n))
++
++    def find(self, i: int) -> int:
++        while self.parent[i] != i:
++            self.parent[i] = self.parent[self.parent[i]]
++            i = self.parent[i]
++        return i
++
++    def union(self, a: int, b: int) -> None:
++        ra, rb = self.find(a), self.find(b)
++        if ra != rb:
++            self.parent[max(ra, rb)] = min(ra, rb)
++
++
++def assign_groups(
++    samples: list[Sample],
++    dataset_root: str | Path,
++    hash_threshold: int = 10,
++    use_hash: bool = True,
++) -> dict:
++    """Fill sample.group in place. Returns a small report dict."""
++    n = len(samples)
++    uf = _UnionFind(n)
++
++    by_name: dict[tuple[str, str], int] = {}
++    for i, s in enumerate(samples):
++        key = (s.item_type, source_key(Path(s.rel_path).stem))
++        if key in by_name:
++            uf.union(by_name[key], i)
++        else:
++            by_name[key] = i
++
++    unhashable: list[str] = []
++    hash_links = 0
++    if use_hash:
++        hashes: list[Optional[tuple[int, int]]] = []
++        for s in samples:
++            h = dhash_pair(s.abs_path(dataset_root))
++            hashes.append(h)
++            if h is None:
++                unhashable.append(s.rel_path)
++            else:
++                s.phash = f"{h[0]:016x}"
++        for i in range(n):
++            hi = hashes[i]
++            if hi is None:
++                continue
++            for j in range(i + 1, n):
++                hj = hashes[j]
++                if hj is None or uf.find(i) == uf.find(j):
++                    continue
++                if samples[i].item_type != samples[j].item_type:
++                    continue
++                d = min(_popcount(hi[0] ^ hj[0]), _popcount(hi[0] ^ hj[1]))
++                if d <= hash_threshold:
++                    uf.union(i, j)
++                    hash_links += 1
++
++    roots: dict[int, str] = {}
++    for i, s in enumerate(samples):
++        r = uf.find(i)
++        if r not in roots:
++            roots[r] = f"g{len(roots):05d}"
++        s.group = roots[r]
++
++    sizes = Counter(s.group for s in samples)
++    return {
++        "n_groups": len(sizes),
++        "largest_group": max(sizes.values()) if sizes else 0,
++        "hash_links": hash_links,
++        "unhashable": unhashable,
++    }
++
++
++# ----------------------------------------------------------------- splitting
++
++
++def _group_table(samples: list[Sample]) -> dict[str, dict]:
++    table: dict[str, dict] = {}
++    for s in samples:
++        g = table.setdefault(s.group, {"real": Counter(), "all": Counter(), "n_real": 0})
++        g["all"][s.label] += 1
++        if not s.synthetic:
++            g["real"][s.label] += 1
++            g["n_real"] += 1
++    return table
++
++
++def _majority(counter: Counter) -> str:
++    top = max(counter.values())
++    return sorted(k for k, v in counter.items() if v == top)[0]
++
++
++def split_groups(
++    samples: list[Sample],
++    val_ratio: float,
++    test_ratio: float,
++    seed: int,
++) -> dict[str, str]:
++    """Assign each group to train, val, or test. Stratified by label, by real
++    sample count (val and test hold real images only)."""
++    if val_ratio < 0 or test_ratio < 0 or val_ratio + test_ratio >= 1:
++        raise ValueError("val_ratio + test_ratio must be in [0, 1)")
++
++    table = _group_table(samples)
++    assignment: dict[str, str] = {}
++    eligible: list[str] = []
++    for gid, info in table.items():
++        if info["n_real"] == 0:
++            assignment[gid] = "train"  # synthetic-only: never evaluate on it
++        else:
++            eligible.append(gid)
++
++    real_per_label: Counter = Counter()
++    for gid in eligible:
++        real_per_label[_majority(table[gid]["real"])] += table[gid]["n_real"]
++
++    target = {
++        "val": {l: val_ratio * c for l, c in real_per_label.items()},
++        "test": {l: test_ratio * c for l, c in real_per_label.items()},
++        "train": {l: (1 - val_ratio - test_ratio) * c for l, c in real_per_label.items()},
++    }
++    got = {s: Counter() for s in SPLITS}
++
++    rng = random.Random(seed)
++    order = sorted(eligible)
++    rng.shuffle(order)
++    order.sort(key=lambda g: -table[g]["n_real"])  # stable: big groups first
++
++    pref = {"val": 0, "test": 1, "train": 2}
++    for gid in order:
++        label = _majority(table[gid]["real"])
++        size = table[gid]["n_real"]
++        best, best_score = "train", None
++        for split in sorted(SPLITS, key=pref.get):
++            t = target[split].get(label, 0.0)
++            if t <= 0:
++                continue
++            score = (t - got[split][label]) / t
++            if best_score is None or score > best_score:
++                best, best_score = split, score
++        assignment[gid] = best
++        got[best][label] += size
++    return assignment
++
++
++# ------------------------------------------------------------------ manifest
++
++
++def make_splits(
++    dataset_root: str | Path,
++    val_ratio: float = 0.15,
++    test_ratio: float = 0.15,
++    seed: int = 42,
++    hash_threshold: int = 10,
++    use_hash: bool = True,
++    overrides_path: Optional[str | Path] = None,
++) -> dict:
++    """Build the full manifest: {"meta": {...}, "entries": [...]}."""
++    overrides = load_overrides(overrides_path) if overrides_path else {}
++    samples = collect_samples(dataset_root, overrides)
++    if not samples:
++        raise FileNotFoundError(f"no images found under {dataset_root}")
++
++    group_report = assign_groups(samples, dataset_root, hash_threshold, use_hash)
++    assignment = split_groups(samples, val_ratio, test_ratio, seed)
++
++    for s in samples:
++        gsplit = assignment[s.group]
++        s.split = DROPPED if (s.synthetic and gsplit != "train") else gsplit
++
++    conflicts: dict[str, list[str]] = defaultdict(list)
++    labels_by_group: dict[str, set] = defaultdict(set)
++    for s in samples:
++        labels_by_group[s.group].add(s.label)
++    for s in samples:
++        if len(labels_by_group[s.group]) > 1:
++            conflicts[s.group].append(f"{s.rel_path} [{s.label}]")
++
++    counts = {sp: Counter() for sp in (*SPLITS, DROPPED)}
++    for s in samples:
++        counts[s.split][s.label] += 1
++
++    warnings: list[str] = []
++    for sp in ("val", "test"):
++        for label in LABEL2ID:
++            if counts[sp][label] == 0:
++                warnings.append(f"{sp} has no {label!r} samples")
++    if group_report["largest_group"] > 0.2 * len(samples):
++        warnings.append(
++            f"largest group has {group_report['largest_group']} samples "
++            f"(>20% of pool); hash threshold may be too loose"
++        )
++    if conflicts:
++        warnings.append(
++            f"{len(conflicts)} groups mix labels (same source image under more "
++            f"than one label); review before trusting metrics"
++        )
++
++    return {
++        "meta": {
++            "seed": seed,
++            "val_ratio": val_ratio,
++            "test_ratio": test_ratio,
++            "hash_threshold": hash_threshold,
++            "use_hash": use_hash,
++            "overrides": len(overrides),
++            "n_samples": len(samples),
++            **{k: v for k, v in group_report.items() if k != "unhashable"},
++            "n_unhashable": len(group_report["unhashable"]),
++            "counts": {sp: dict(c) for sp, c in counts.items()},
++            "label_conflicts": dict(conflicts),
++            "warnings": warnings,
++        },
++        "entries": [asdict(s) for s in samples],
++    }
++
++
++def write_manifest(manifest: dict, path: str | Path) -> None:
++    Path(path).parent.mkdir(parents=True, exist_ok=True)
++    with open(path, "w", encoding="utf-8") as fh:
++        json.dump(manifest, fh, indent=1, sort_keys=True)
++
++
++def load_manifest(path: str | Path) -> dict:
++    with open(path, encoding="utf-8") as fh:
++        return json.load(fh)
++
++
++def samples_for(
++    manifest: dict, split: str, dataset_root: str | Path
++) -> list[tuple[str, int]]:
++    """(abs_path, label_id) pairs for one split."""
++    root = Path(dataset_root)
++    return [
++        (str(root / e["rel_path"]), LABEL2ID[e["label"]])
++        for e in manifest["entries"]
++        if e["split"] == split
++    ]
+diff --git a/ml/classifier/train.py b/ml/classifier/train.py
+index 5b0e36c..9288fec 100644
+--- a/ml/classifier/train.py
++++ b/ml/classifier/train.py
+@@ -1,22 +1,28 @@
+ """
+-Fine-tune ViT on the fire damage dataset.
++Fine-tune ViT on the damage dataset.
+ 
+ Usage:
+     python -m classifier.train --dataset ../../dataset --output ./checkpoints
+ 
+-The script fine-tunes the full ViT model with AdamW and a cosine LR schedule,
+-saving the best checkpoint (by val accuracy) to --output.
++Splits are made by source-image group (see splits.py), so synthetic copies
++never straddle train and val. The best checkpoint is chosen by macro-F1 on the
++val split. The test split is evaluated exactly once, after training, on that
++checkpoint, and the report is written to <output>/eval_report.json. The split
++manifest is written to <output>/split_manifest.json.
+ """
+ 
+ import argparse
++import json
+ import os
+ 
++import numpy as np
+ import torch
+ import torch.nn as nn
+ from torch.utils.data import DataLoader
+ 
+ from .dataset import DamageDataset, build_splits
+-from .model import load_model
++from .metrics import build_report, macro_f1
++from .model import load_finetuned, load_model
+ 
+ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+ 
+@@ -27,9 +33,14 @@ def train(
+     epochs: int = 10,
+     batch_size: int = 16,
+     lr: float = 2e-5,
+-    val_ratio: float = 0.2,
++    val_ratio: float = 0.15,
++    test_ratio: float = 0.15,
++    seed: int = 42,
++    overrides_path: str | None = None,
++    hash_threshold: int = 10,
+ ):
+     os.makedirs(output_dir, exist_ok=True)
++    torch.manual_seed(seed)
+ 
+     print(f"Device: {DEVICE}")
+     print(f"Loading dataset from: {dataset_root}")
+@@ -37,23 +48,36 @@ def train(
+     model, processor = load_model()
+     model.to(DEVICE)
+ 
+-    train_samples, val_samples = build_splits(dataset_root, val_ratio=val_ratio)
+-    print(f"Train: {len(train_samples)} | Val: {len(val_samples)}")
++    manifest_path = os.path.join(output_dir, "split_manifest.json")
++    train_samples, val_samples, test_samples = build_splits(
++        dataset_root,
++        val_ratio=val_ratio,
++        test_ratio=test_ratio,
++        seed=seed,
++        manifest_path=manifest_path,
++        overrides_path=overrides_path,
++        hash_threshold=hash_threshold,
++    )
++    print(f"Train: {len(train_samples)} | Val: {len(val_samples)} | Test: {len(test_samples)}")
++    print(f"Manifest: {manifest_path}")
++    if not val_samples or not test_samples:
++        raise SystemExit("val or test split is empty; check split_manifest.json warnings")
+ 
+     train_dataset = DamageDataset(train_samples, processor)
+     val_dataset = DamageDataset(val_samples, processor)
++    test_dataset = DamageDataset(test_samples, processor)
+ 
+     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
++    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
+ 
+     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+     criterion = nn.CrossEntropyLoss()
+ 
+-    best_val_acc = 0.0
++    best_val_f1 = -1.0
+ 
+     for epoch in range(epochs):
+-        # --- Training ---
+         model.train()
+         train_loss, train_correct, train_total = 0.0, 0, 0
+ 
+@@ -74,37 +98,51 @@ def train(
+ 
+         scheduler.step()
+ 
+-        # --- Validation ---
+-        val_acc = _evaluate(model, val_loader)
++        probs, y_true = _predict_all(model, val_loader)
++        val_acc = float((probs.argmax(axis=1) == y_true).mean()) if len(y_true) else 0.0
++        val_f1 = macro_f1(y_true, probs.argmax(axis=1), probs.shape[1])
+ 
+-        avg_loss = train_loss / train_total
+-        avg_acc = train_correct / train_total
+         print(
+             f"Epoch {epoch + 1}/{epochs}  "
+-            f"loss={avg_loss:.4f}  train_acc={avg_acc:.3f}  val_acc={val_acc:.3f}"
++            f"loss={train_loss / train_total:.4f}  train_acc={train_correct / train_total:.3f}  "
++            f"val_acc={val_acc:.3f}  val_macro_f1={val_f1:.3f}"
+         )
+ 
+-        if val_acc > best_val_acc:
+-            best_val_acc = val_acc
++        if val_f1 > best_val_f1:
++            best_val_f1 = val_f1
+             model.save_pretrained(output_dir)
+             processor.save_pretrained(output_dir)
+-            print(f"  ✓ Saved best model (val_acc={val_acc:.3f})")
+-
+-    print(f"\nTraining complete. Best val_acc: {best_val_acc:.3f}")
++            print(f"  saved best model (val_macro_f1={val_f1:.3f})")
++
++    print(f"\nTraining complete. Best val macro-F1: {best_val_f1:.3f}")
++
++    # Test split: touched once, on the checkpoint chosen by val.
++    best, _ = load_finetuned(output_dir)
++    best.to(DEVICE)
++    probs, y_true = _predict_all(best, test_loader)
++    report = build_report(probs, y_true)
++    report["best_val_macro_f1"] = round(best_val_f1, 4)
++    report_path = os.path.join(output_dir, "eval_report.json")
++    with open(report_path, "w", encoding="utf-8") as fh:
++        json.dump(report, fh, indent=1)
++    print(f"Test accuracy={report['accuracy']}  macro_f1={report['macro_f1']}  ece={report['ece']}")
++    print(f"Test report: {report_path}")
+     print(f"Model saved to: {output_dir}")
+ 
+ 
+-def _evaluate(model: nn.Module, loader: DataLoader) -> float:
++def _predict_all(model: nn.Module, loader: DataLoader):
++    """Softmax probabilities (N, C) and true labels (N,) as numpy arrays."""
+     model.eval()
+-    correct, total = 0, 0
++    all_probs, all_labels = [], []
+     with torch.no_grad():
+         for batch in loader:
+             pixel_values = batch["pixel_values"].to(DEVICE)
+-            labels = batch["labels"].to(DEVICE)
+-            outputs = model(pixel_values=pixel_values)
+-            correct += (outputs.logits.argmax(dim=-1) == labels).sum().item()
+-            total += len(labels)
+-    return correct / total if total > 0 else 0.0
++            logits = model(pixel_values=pixel_values).logits
++            all_probs.append(torch.softmax(logits, dim=-1).cpu().numpy())
++            all_labels.append(batch["labels"].numpy())
++    if not all_probs:
++        return np.zeros((0, 3)), np.zeros((0,), dtype=int)
++    return np.concatenate(all_probs), np.concatenate(all_labels)
+ 
+ 
+ if __name__ == "__main__":
+@@ -114,6 +152,11 @@ if __name__ == "__main__":
+     parser.add_argument("--epochs", type=int, default=10)
+     parser.add_argument("--batch-size", type=int, default=16)
+     parser.add_argument("--lr", type=float, default=2e-5)
++    parser.add_argument("--val-ratio", type=float, default=0.15)
++    parser.add_argument("--test-ratio", type=float, default=0.15)
++    parser.add_argument("--seed", type=int, default=42)
++    parser.add_argument("--overrides", default=None, help="CSV of audited label fixes (rel_path,label,note)")
++    parser.add_argument("--hash-threshold", type=int, default=10)
+     args = parser.parse_args()
+ 
+     train(
+@@ -122,4 +165,9 @@ if __name__ == "__main__":
+         epochs=args.epochs,
+         batch_size=args.batch_size,
+         lr=args.lr,
++        val_ratio=args.val_ratio,
++        test_ratio=args.test_ratio,
++        seed=args.seed,
++        overrides_path=args.overrides,
++        hash_threshold=args.hash_threshold,
+     )
+diff --git a/tests/test_classifier_splits.py b/tests/test_classifier_splits.py
+new file mode 100644
+index 0000000..581e0be
+--- /dev/null
++++ b/tests/test_classifier_splits.py
+@@ -0,0 +1,209 @@
++"""Tests for the leak-free classifier splits and held-out metrics.
++
++No torch needed: splits.py, labels.py and metrics.py are torch-free.
++"""
++
++import csv
++import sys
++from collections import defaultdict
++from pathlib import Path
++
++import pytest
++
++ML = Path(__file__).resolve().parent.parent / "ml"
++if str(ML) not in sys.path:
++    sys.path.insert(0, str(ML))
++
++np = pytest.importorskip("numpy")
++Image = pytest.importorskip("PIL.Image")
++
++from classifier.metrics import (  # noqa: E402
++    build_report,
++    confusion_matrix,
++    expected_calibration_error,
++)
++from classifier.splits import (  # noqa: E402
++    DROPPED,
++    make_splits,
++    samples_for,
++    source_key,
++)
++
++FOLDERS = {
++    "chair_intact": "chair_intact_synthetic",
++    "chair_damaged/damaged": "chair_damaged/damaged_synthetic",
++    "chair_damaged/salvageable": "chair_damaged/salvageable_synthetic",
++}
++
++
++def _noise(seed: int) -> "np.ndarray":
++    return np.random.default_rng(seed).integers(0, 256, (64, 64), dtype=np.uint8)
++
++
++def _save(arr, path: Path) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    Image.fromarray(arr).save(path)
++
++
++@pytest.fixture
++def dataset(tmp_path):
++    """Per class: 20 real images, a same-name synthetic (brightened) for each,
++    and a mirrored copy under an unrelated filename (hash must catch it)."""
++    seed = 0
++    for real_dir, syn_dir in FOLDERS.items():
++        tag = real_dir.replace("/", "_")
++        for i in range(20):
++            seed += 1
++            arr = _noise(seed)
++            _save(arr, tmp_path / real_dir / f"{tag}_{i}.png")
++            _save(np.clip(arr.astype(int) + 8, 0, 255).astype(np.uint8),
++                  tmp_path / syn_dir / f"{tag}_{i}_synthetic_1.png")
++            _save(arr[:, ::-1].copy(), tmp_path / syn_dir / f"zz_{tag}_{i}.png")
++    return tmp_path
++
++
++class TestSourceKey:
++    @pytest.mark.parametrize(
++        "stem, expected",
++        [
++            ("chair_12_synthetic_3", "chair_12"),
++            ("chair_12_aug3_flip", "chair_12"),
++            ("chair_12", "chair_12"),
++            ("chair_12 (1)", "chair_12"),
++            ("synergy_chair", "synergy_chair"),
++            ("Chair-7-SYN", "chair-7"),
++        ],
++    )
++    def test_key(self, stem, expected):
++        assert source_key(stem) == expected
++
++
++class TestSplits:
++    def test_no_group_spans_splits(self, dataset):
++        m = make_splits(dataset, seed=1)
++        splits_by_group = defaultdict(set)
++        for e in m["entries"]:
++            if e["split"] != DROPPED:
++                splits_by_group[e["group"]].add(e["split"])
++        assert all(len(s) == 1 for s in splits_by_group.values())
++
++    def test_val_and_test_are_real_only(self, dataset):
++        m = make_splits(dataset, seed=1)
++        for e in m["entries"]:
++            if e["split"] in ("val", "test"):
++                assert not e["synthetic"]
++
++    def test_synthetics_follow_or_drop(self, dataset):
++        m = make_splits(dataset, seed=1)
++        group_split = {}
++        for e in m["entries"]:
++            if not e["synthetic"]:
++                group_split[e["group"]] = e["split"]
++        for e in m["entries"]:
++            if e["synthetic"]:
++                gs = group_split[e["group"]]
++                assert e["split"] == (gs if gs == "train" else DROPPED)
++
++    def test_renamed_mirror_is_grouped_by_hash(self, dataset):
++        m = make_splits(dataset, seed=1)
++        by_path = {e["rel_path"]: e for e in m["entries"]}
++        for i in range(20):
++            real = by_path[f"chair_intact/chair_intact_{i}.png"]
++            mirror = by_path[f"chair_intact_synthetic/zz_chair_intact_{i}.png"]
++            assert real["group"] == mirror["group"]
++
++    def test_without_hash_renamed_mirror_leaks(self, dataset):
++        # Documents why the hash pass exists.
++        m = make_splits(dataset, seed=1, use_hash=False)
++        by_path = {e["rel_path"]: e for e in m["entries"]}
++        leaked = sum(
++            by_path[f"chair_intact/chair_intact_{i}.png"]["group"]
++            != by_path[f"chair_intact_synthetic/zz_chair_intact_{i}.png"]["group"]
++            for i in range(20)
++        )
++        assert leaked == 20
++
++    def test_all_splits_cover_all_labels(self, dataset):
++        m = make_splits(dataset, seed=1)
++        assert m["meta"]["warnings"] == []
++        for sp in ("train", "val", "test"):
++            assert set(m["meta"]["counts"][sp]) == {"intact", "salvageable", "destroyed"}
++
++    def test_deterministic_for_seed(self, dataset):
++        a = make_splits(dataset, seed=7)
++        b = make_splits(dataset, seed=7)
++        assert [e["split"] for e in a["entries"]] == [e["split"] for e in b["entries"]]
++
++    def test_seed_changes_assignment(self, dataset):
++        a = make_splits(dataset, seed=1)
++        b = make_splits(dataset, seed=2)
++        assert [e["split"] for e in a["entries"]] != [e["split"] for e in b["entries"]]
++
++    def test_ratios_validated(self, dataset):
++        with pytest.raises(ValueError):
++            make_splits(dataset, val_ratio=0.6, test_ratio=0.5)
++
++    def test_samples_for_returns_label_ids(self, dataset):
++        m = make_splits(dataset, seed=1)
++        train = samples_for(m, "train", dataset)
++        assert train and all(isinstance(lbl, int) for _, lbl in train)
++
++    def test_unreadable_file_does_not_crash(self, dataset):
++        (dataset / "chair_intact" / "broken.png").write_bytes(b"not an image")
++        m = make_splits(dataset, seed=1)
++        assert m["meta"]["n_unhashable"] >= 1
++
++    def test_label_conflict_reported(self, dataset):
++        arr = _noise(999)
++        _save(arr, dataset / "chair_intact" / "dup_a.png")
++        _save(arr, dataset / "chair_damaged/damaged" / "dup_b.png")
++        m = make_splits(dataset, seed=1)
++        assert m["meta"]["label_conflicts"]
++        assert any("conflict" in w or "mix labels" in w for w in m["meta"]["warnings"])
++
++
++class TestOverrides:
++    def _write(self, path, rows):
++        with open(path, "w", newline="") as fh:
++            w = csv.writer(fh)
++            w.writerow(["rel_path", "label", "note"])
++            w.writerows(rows)
++
++    def test_relabel_and_drop(self, dataset, tmp_path):
++        ov = tmp_path / "ov.csv"
++        self._write(ov, [
++            ["chair_intact/chair_intact_0.png", "destroyed", "burnt"],
++            ["chair_intact/chair_intact_1.png", "drop", "not a chair"],
++        ])
++        m = make_splits(dataset, seed=1, overrides_path=ov)
++        by_path = {e["rel_path"]: e for e in m["entries"]}
++        assert by_path["chair_intact/chair_intact_0.png"]["label"] == "destroyed"
++        assert by_path["chair_intact/chair_intact_0.png"]["label_source"] == "override"
++        assert "chair_intact/chair_intact_1.png" not in by_path
++
++    def test_unknown_label_rejected(self, dataset, tmp_path):
++        ov = tmp_path / "ov.csv"
++        self._write(ov, [["chair_intact/chair_intact_0.png", "wet", ""]])
++        with pytest.raises(ValueError):
++            make_splits(dataset, seed=1, overrides_path=ov)
++
++
++class TestMetrics:
++    def test_confusion_and_report(self):
++        probs = np.array([[0.9, 0.05, 0.05], [0.1, 0.8, 0.1], [0.2, 0.2, 0.6], [0.7, 0.2, 0.1]])
++        y = np.array([0, 1, 2, 2])
++        cm = confusion_matrix(y, probs.argmax(axis=1), 3)
++        assert cm.tolist() == [[1, 0, 0], [0, 1, 0], [1, 0, 1]]
++        r = build_report(probs, y)
++        assert r["accuracy"] == 0.75
++        by = {row["class"]: row for row in r["per_class"]}
++        assert by["intact"]["precision"] == 0.5
++        assert by["destroyed"]["recall"] == 0.5
++
++    def test_ece_zero_when_perfectly_calibrated_and_correct(self):
++        probs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
++        assert expected_calibration_error(probs, np.array([0, 1])) == 0.0
++
++    def test_ece_flags_overconfident_errors(self):
++        probs = np.array([[0.99, 0.005, 0.005]] * 4)
++        assert expected_calibration_error(probs, np.array([1, 1, 1, 1])) > 0.9
+-- 
+2.43.0
+

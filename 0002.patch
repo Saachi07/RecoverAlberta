@@ -1,0 +1,571 @@
+From bb182ab3108097e50bd016e6415f78c38eb7d93b Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Fri, 23 Oct 2026 02:02:39 +0000
+Subject: [PATCH 2/3] inventory: taxonomy v1 (114 leaves, reviewable CSV) and
+ whole-token lookup for claim class
+
+- app/data/taxonomy_v1.csv: id, group, claim_class, bulk, high_value, aliases; lifespan and price source left empty, reviewed=0 for a professional to fill
+- services/taxonomy.py: whole-token longest-alias match, head-noun tie-break, built-in/freestanding modifiers
+- classify_claim_class now delegates to the taxonomy; fixes outdoor/door, filing cabinet, hair trimmer
+- tests: 36 cases
+---
+ backend/app/data/taxonomy_v1.csv         | 115 +++++++++++++
+ backend/app/services/gemini_inventory.py |  59 ++-----
+ backend/app/services/taxonomy.py         | 208 +++++++++++++++++++++++
+ tests/test_taxonomy.py                   | 131 ++++++++++++++
+ 4 files changed, 466 insertions(+), 47 deletions(-)
+ create mode 100644 backend/app/data/taxonomy_v1.csv
+ create mode 100644 backend/app/services/taxonomy.py
+ create mode 100644 tests/test_taxonomy.py
+
+diff --git a/backend/app/data/taxonomy_v1.csv b/backend/app/data/taxonomy_v1.csv
+new file mode 100644
+index 0000000..16b00a0
+--- /dev/null
++++ b/backend/app/data/taxonomy_v1.csv
+@@ -0,0 +1,115 @@
++id,name,group,claim_class,legacy_category,bulk,modifiers,high_value,aliases,lifespan_years,price_band_source,reviewed
++chair,Chair,Seating,contents,furniture,0,0,0,chair|wooden chair|plastic chair|folding chair|dining chair|kitchen chair|side chair|accent chair,,,0
++office_chair,Office chair,Seating,contents,furniture,0,0,0,office chair|desk chair|task chair|gaming chair|swivel chair,,,0
++sofa,Sofa,Seating,contents,furniture,0,0,0,sofa|couch|settee|sectional|sectional sofa|chesterfield,,,0
++loveseat,Loveseat,Seating,contents,furniture,0,0,0,loveseat|love seat,,,0
++armchair,Armchair,Seating,contents,furniture,0,0,0,armchair|arm chair|recliner|lounge chair|club chair,,,0
++stool,Stool,Seating,contents,furniture,0,0,0,stool|bar stool|counter stool,,,0
++bench,Bench,Seating,contents,furniture,0,0,0,bench|storage bench|piano bench,,,0
++ottoman,Ottoman,Seating,contents,furniture,0,0,0,ottoman|pouf|footstool|foot stool,,,0
++table,Table,Tables,contents,furniture,0,0,0,table,,,0
++dining_table,Dining table,Tables,contents,furniture,0,0,0,dining table|kitchen table,,,0
++coffee_table,Coffee table,Tables,contents,furniture,0,0,0,coffee table,,,0
++side_table,Side table,Tables,contents,furniture,0,0,0,side table|end table|accent table|console table,,,0
++desk,Desk,Tables,contents,furniture,0,0,0,desk|writing desk|computer desk|standing desk,,,0
++nightstand,Nightstand,Tables,contents,furniture,0,0,0,nightstand|night stand|bedside table,,,0
++tv_stand,TV stand,Tables,contents,furniture,0,0,0,tv stand|media console|entertainment center|tv unit|tv cabinet,,,0
++dresser,Dresser,Storage furniture,contents,furniture,0,0,0,dresser|chest of drawers|tallboy|lowboy,,,0
++bookshelf,Bookshelf,Storage furniture,contents,furniture,0,0,0,bookshelf|bookcase|book shelf|shelving unit|shelf unit|shelves|shelf,,,0
++wardrobe,Wardrobe,Storage furniture,contents,furniture,0,0,0,wardrobe|armoire,,,0
++freestanding_cabinet,Freestanding cabinet,Storage furniture,contents,furniture,0,0,0,freestanding cabinet|free standing cabinet|storage cabinet|china cabinet|display cabinet|curio cabinet|sideboard|buffet|hutch,,,0
++filing_cabinet,Filing cabinet,Storage furniture,contents,furniture,0,0,0,filing cabinet|file cabinet,,,0
++shoe_rack,Shoe rack,Storage furniture,contents,furniture,0,0,0,shoe rack|shoe cabinet|shoe organizer,,,0
++cabinet_unspecified,Cabinet (type not clear),Storage furniture,unclear,furniture,0,1,0,cabinet,,,0
++mattress,Mattress,Beds,contents,furniture,0,0,0,mattress|box spring|mattress set,,,0
++bed_frame,Bed frame,Beds,contents,furniture,0,0,0,bed frame|bed|headboard|bunk bed|platform bed|daybed,,,0
++crib,Crib,Beds,contents,furniture,0,0,0,crib|cot|bassinet,,,0
++refrigerator,Refrigerator,Major appliances,contents,appliance,0,1,0,refrigerator|fridge|fridge freezer|refrigerator freezer,,,0
++freezer,Freezer,Major appliances,contents,appliance,0,1,0,freezer|chest freezer|deep freezer|upright freezer,,,0
++washer,Washer,Major appliances,contents,appliance,0,1,0,washer|washing machine|clothes washer,,,0
++dryer,Dryer,Major appliances,contents,appliance,0,1,0,dryer|clothes dryer|tumble dryer,,,0
++dishwasher,Dishwasher,Major appliances,unclear,appliance,0,1,0,dishwasher,,,0
++range,Range or stove,Major appliances,unclear,appliance,0,1,0,range|stove|stove top|stovetop|cooktop|cook top|gas range|electric range,,,0
++oven_unspecified,Oven (type not clear),Major appliances,unclear,appliance,0,1,0,oven|convection oven,,,0
++microwave,Microwave,Major appliances,contents,appliance,0,1,0,microwave|microwave oven,,,0
++air_conditioner,Air conditioner,Major appliances,unclear,appliance,0,0,0,air conditioner|ac unit|portable air conditioner|window air conditioner|window ac|a/c unit,,,0
++dehumidifier,Dehumidifier,Major appliances,contents,appliance,0,0,0,dehumidifier|humidifier,,,0
++kettle,Kettle,Small appliances,contents,appliance,0,0,0,kettle|electric kettle,,,0
++toaster,Toaster,Small appliances,contents,appliance,0,0,0,toaster|toaster oven,,,0
++air_fryer,Air fryer,Small appliances,contents,appliance,0,0,0,air fryer|airfryer,,,0
++vacuum,Vacuum,Small appliances,contents,appliance,0,0,0,vacuum|vacuum cleaner|robot vacuum|shop vac,,,0
++blender,Blender,Small appliances,contents,appliance,0,0,0,blender|food processor|immersion blender,,,0
++coffee_maker,Coffee maker,Small appliances,contents,appliance,0,0,0,coffee maker|coffee machine|espresso machine|keurig|coffee grinder,,,0
++stand_mixer,Stand mixer,Small appliances,contents,appliance,0,0,0,stand mixer|mixer|hand mixer,,,0
++slow_cooker,Slow cooker or multicooker,Small appliances,contents,appliance,0,0,0,slow cooker|crock pot|instant pot|pressure cooker|rice cooker|multicooker,,,0
++iron,Iron,Small appliances,contents,appliance,0,0,0,iron|clothes iron|steamer|ironing board,,,0
++fan,Fan,Small appliances,contents,appliance,0,0,0,fan|table fan|pedestal fan|box fan|window fan|tower fan,,,0
++space_heater,Space heater,Small appliances,contents,appliance,0,0,0,space heater|portable heater|electric heater,,,0
++tv,Television,Electronics,contents,electronics,0,0,0,tv|television|smart tv|flat screen|flat screen tv|flatscreen|oled tv|led tv,,,0
++laptop,Laptop,Electronics,contents,electronics,0,0,0,laptop|notebook computer|macbook|chromebook,,,0
++desktop_computer,Desktop computer,Electronics,contents,electronics,0,0,0,desktop computer|computer tower|pc|desktop pc|imac|computer,,,0
++monitor,Computer monitor,Electronics,contents,electronics,0,0,0,monitor|computer monitor|display monitor,,,0
++game_console,Game console,Electronics,contents,electronics,0,0,0,game console|gaming console|playstation|xbox|nintendo switch|ps5|ps4,,,0
++audio_system,Audio system,Electronics,contents,electronics,0,0,0,soundbar|sound bar|speaker|speakers|bluetooth speaker|stereo|home theater|surround sound|record player|turntable|receiver,,,0
++network_gear,Router or modem,Electronics,contents,electronics,0,0,0,router|modem|wifi router|wi-fi router|mesh router,,,0
++tablet,Tablet or e-reader,Electronics,contents,electronics,0,0,0,tablet|ipad|e-reader|ereader|kindle,,,0
++phone,Phone,Electronics,contents,electronics,0,0,0,phone|smartphone|cell phone|cellphone|iphone|landline,,,0
++printer,Printer,Electronics,contents,electronics,0,0,0,printer|scanner|3d printer,,,0
++camera,Camera,Electronics,contents,electronics,0,0,0,camera|dslr|camcorder|drone|gopro,,,0
++headphones,Headphones,Electronics,contents,electronics,0,0,0,headphones|earbuds|headset|airpods,,,0
++area_rug,Area rug,Soft goods,contents,decor,0,0,0,area rug|rug|throw rug|runner|carpet runner|persian carpet|oriental carpet|persian rug|oriental rug|door mat|doormat|bath mat,,,0
++window_coverings,Curtains or blinds,Soft goods,contents,decor,0,0,0,curtain|curtains|drape|drapes|drapery|blind|blinds|window blind|shade|window shade|valance,,,0
++bedding,Bedding,Soft goods,contents,other,1,0,0,bedding|bed sheet|sheets|duvet|comforter|pillow|pillows|blanket|quilt|bedspread,,,0
++linens,Linens and towels,Soft goods,contents,other,1,0,0,linen|linens|towel|towels|bath towel|tablecloth|shower curtain,,,0
++framed_art,Framed art or photos,Decor,contents,decor,0,0,0,painting|framed art|wall art|picture|framed picture|photo frame|picture frame|poster|print,,,0
++mirror,Mirror,Decor,contents,decor,0,0,0,mirror|wall mirror|floor mirror|vanity mirror,,,0
++floor_lamp,Floor lamp,Decor,contents,decor,0,0,0,floor lamp|standing lamp|torchiere,,,0
++table_lamp,Table lamp,Decor,contents,decor,0,0,0,table lamp|desk lamp|bedside lamp|lamp,,,0
++houseplant,Houseplant,Decor,contents,decor,0,0,0,plant|houseplant|potted plant|planter|artificial plant,,,0
++decor_misc,Decor items,Decor,contents,decor,1,0,0,decor|decoration|decorations|decorative item|vase|figurine|candle|ornament|clock|wall clock|knickknack,,,0
++dishes_glassware,Dishes and glassware,Kitchenware,contents,other,1,0,0,dishes|dish|dishware|plates|plate|bowls|bowl|dinnerware|glassware|mugs|mug|cups|cup|china,,,0
++cookware_utensils,Cookware and utensils,Kitchenware,contents,other,1,0,0,cookware|pots|pot|pans|pan|bakeware|frying pan|utensils|cutlery|silverware|flatware|knives|knife set|cooking utensils,,,0
++clothing,Clothing,Clothing,contents,clothing,1,0,0,clothes|clothing|garment|shirt|shirts|pants|dress|sweater|jeans|suit|apparel,,,0
++coats,Coats and outerwear,Clothing,contents,clothing,1,0,0,coat|coats|jacket|jackets|parka|winter coat|outerwear,,,0
++shoes,Shoes and boots,Clothing,contents,clothing,1,0,0,shoe|shoes|boot|boots|sneaker|sneakers|footwear,,,0
++closet_contents,Closet contents,Clothing,contents,clothing,1,0,0,closet contents|clothes in closet|wardrobe contents|hanging clothes,,,0
++books_media,Books and media,Books and media,contents,other,1,0,0,book|books|bookshelf contents|novel|textbook|dvd|dvds|cd|cds|vinyl record|records|media collection|magazine|magazines,,,0
++power_tools,Power tools,Tools and garage,contents,other,0,0,0,power tool|power tools|drill|saw|circular saw|table saw|tool set|hand tools|tools,,,0
++toolbox,Toolbox,Tools and garage,contents,other,1,0,0,toolbox|tool box|tool chest,,,0
++workbench,Workbench,Tools and garage,contents,furniture,0,0,0,workbench|work bench,,,0
++bicycle,Bicycle,Tools and garage,contents,other,0,0,0,bicycle|bike|e-bike|ebike|electric bike|mountain bike,,,0
++ladder,Ladder,Tools and garage,contents,other,0,0,0,ladder|step ladder|stepladder,,,0
++generator,Generator,Tools and garage,contents,other,0,0,0,generator|portable generator,,,0
++art_supplies,Paint and craft supplies,Tools and garage,contents,other,1,0,0,paint set|paint brush|paintbrush|paint can|art supplies|craft supplies,,,0
++patio_set,Patio or outdoor furniture,Outdoor,contents,furniture,0,0,0,patio set|patio furniture|patio chair|patio table|outdoor furniture|outdoor chair|outdoor table|deck chair|lawn chair|adirondack chair|hammock,,,0
++bbq,BBQ grill,Outdoor,contents,appliance,0,0,0,bbq|barbecue|grill|propane grill|bbq grill|smoker,,,0
++lawn_equipment,Lawn and snow equipment,Outdoor,contents,other,0,0,0,lawn mower|lawnmower|mower|snowblower|snow blower|weed trimmer|string trimmer|leaf blower|chainsaw|garden tools,,,0
++outbuilding_structure,"Shed, fence, or deck",Outdoor,unclear,other,0,0,0,shed|storage shed|fence|deck|gazebo|pergola|playset|swing set|trampoline|hot tub,,,0
++baby_gear,Baby and child gear,Children,contents,other,0,0,0,stroller|pram|car seat|infant car seat|high chair|baby swing|baby gear|playpen|baby monitor,,,0
++toys,Toys and games,Children,contents,other,1,0,0,toy|toys|toy bin|lego|stuffed animal|stuffed animals|board game|board games|games,,,0
++jewelry,Jewelry and watches,High-value,contents,other,0,0,1,jewelry|jewellery|ring|necklace|watch|bracelet|earrings|wristwatch,,,0
++musical_instrument,Musical instrument,High-value,contents,other,0,0,1,musical instrument|instrument|piano|digital piano|electric keyboard|guitar|electric guitar|violin|drum kit|drums,,,0
++artwork_collectible,Artwork or collectible,High-value,contents,decor,0,0,1,original artwork|original painting|oil painting|sculpture|antique|collectible|collectibles|coin collection|stamp collection|art,,,0
++fitness_equipment,Fitness equipment,High-value,contents,other,0,0,1,treadmill|exercise bike|elliptical|weight bench|dumbbell|dumbbells|weights|barbell|peloton|rowing machine|fitness equipment,,,0
++sports_gear,Sports gear,High-value,contents,other,0,0,0,sports equipment|golf clubs|skis|snowboard|hockey equipment|hockey bag|sports gear|camping gear|tent,,,0
++wall_to_wall_carpet,Wall-to-wall carpet,Building items,building,other,0,0,0,wall-to-wall carpet|wall to wall carpet|wall to wall carpeting|carpeting|carpet|fitted carpet,,,0
++hardwood_flooring,Hardwood flooring,Building items,building,other,0,0,0,hardwood|hardwood floor|hardwood flooring|engineered hardwood,,,0
++laminate_flooring,Laminate or vinyl flooring,Building items,building,other,0,0,0,laminate|laminate flooring|vinyl plank|vinyl flooring|lvp|linoleum,,,0
++tile_flooring,Tile,Building items,building,other,0,0,0,tile|tiles|tile floor|tile flooring|tiling|ceramic tile|backsplash,,,0
++flooring_generic,Flooring,Building items,building,other,0,0,0,floor|floors|flooring,,,0
++wallpaper,Wallpaper,Building items,building,other,0,0,0,wallpaper|wall covering,,,0
++wall_finish,"Walls, paint, ceiling",Building items,building,other,0,0,0,paint|painted wall|wall paint|drywall|interior wall|ceiling|ceilings,,,0
++light_fixture,Light fixture,Building items,building,other,0,0,0,light fixture|light fixtures|ceiling light|pot light|pot lights|recessed light|chandelier|pendant light|sconce|wall sconce|track lighting|vanity light,,,0
++ceiling_fan,Ceiling fan,Building items,building,other,0,0,0,ceiling fan,,,0
++countertop,Countertop,Building items,building,other,0,0,0,countertop|countertops|counter top|counter|worktop|kitchen island,,,0
++built_in_cabinets,Built-in cabinets,Building items,building,other,0,0,0,kitchen cabinet|kitchen cabinets|bathroom cabinet|built-in cabinet|built in cabinet|cupboard|cupboards|bathroom vanity|vanity cabinet,,,0
++wall_oven,Wall oven,Building items,building,appliance,0,0,0,wall oven|double wall oven|built-in wall oven,,,0
++range_hood,Range hood,Building items,building,appliance,0,0,0,range hood|rangehood|exhaust hood|over range hood|hood fan,,,0
++plumbing_fixture,"Sink, faucet, toilet, tub",Building items,building,other,0,0,0,sink|faucet|tap|toilet|bathtub|tub|shower|shower stall|plumbing,,,0
++window,Window,Building items,building,other,0,0,0,window|windows|window frame|skylight,,,0
++door,Door,Building items,building,other,0,0,0,door|doors|front door|garage door|patio door|sliding door|closet door|storm door,,,0
++trim_molding,Baseboard and trim,Building items,building,other,0,0,0,baseboard|baseboards|trim|molding|moulding|crown molding|casing,,,0
++stairs_railing,Stairs and railing,Building items,building,other,0,0,0,staircase|stairs|railing|handrail|banister,,,0
++heating_system,Heating system,Building items,building,other,0,0,0,radiator|baseboard heater|furnace|boiler|heat pump|ductwork|thermostat,,,0
++water_heater,Water heater,Building items,building,other,0,0,0,water heater|hot water tank|tankless water heater,,,0
++fireplace,Fireplace,Building items,building,other,0,0,0,fireplace|gas fireplace|fireplace insert|wood stove|mantel,,,0
+diff --git a/backend/app/services/gemini_inventory.py b/backend/app/services/gemini_inventory.py
+index 752d3e9..caad50c 100644
+--- a/backend/app/services/gemini_inventory.py
++++ b/backend/app/services/gemini_inventory.py
+@@ -199,59 +199,24 @@ class RoomAnalysis(BaseModel):
+     building_items_present: bool = False
+ 
+ 
+-# Keyword fallback for claim_class, mirroring CLAIM_CLASS_GUIDE. Order
+-# matters: building checks run first because names like "carpet" should not
+-# fall through to a contents category default.
+-_BUILDING_KEYWORDS = (
+-    "wall-to-wall carpet", "wall to wall carpet", "carpeting", "carpet",
+-    "hardwood", "laminate", "tile floor", "tiling", "flooring", "floor",
+-    "wallpaper", "paint", "light fixture", "ceiling fan", "ceiling light",
+-    "chandelier", "pot light", "built-in", "built in", "countertop",
+-    "counter top", "cabinet", "cupboard", "wall oven", "range hood",
+-    "plumbing", "sink", "faucet", "toilet", "bathtub", "shower", "window",
+-    "door", "baseboard", "trim", "molding", "moulding", "radiator",
+-    "water heater", "furnace",
+-)
+-
+-_CONTENTS_EXCEPTIONS = (
+-    # Items whose names contain a building keyword but are clearly portable.
+-    "area rug", "throw rug", "rug", "door mat", "doormat", "window fan",
+-    "floor lamp", "table lamp", "lamp", "curtain", "drape", "blind",
+-    "mirror", "painting", "paint set", "paint brush",
+-)
+-
+-_BUILDING_NOTE = (
+-    "Usually part of the building. Homeowners claim it under dwelling "
+-    "coverage; renters should report it to their landlord."
+-)
+-_UNCLEAR_NOTE = (
+-    "Could be contents or part of the building. Ask your adjuster how to "
+-    "claim it."
+-)
++# Notes are defined next to the taxonomy; re-exported here for older imports.
++from .taxonomy import BUILDING_NOTE as _BUILDING_NOTE  # noqa: E402
++from .taxonomy import UNCLEAR_NOTE as _UNCLEAR_NOTE  # noqa: E402
++from .taxonomy import resolve_claim_class  # noqa: E402
+ 
+ 
+ def classify_claim_class(name: str, category: str) -> tuple[str, Optional[str]]:
+     """Deterministic contents-vs-building fallback used when the model omits
+-    claim_class. Canadian homeowner policy convention: portable belongings
+-    are contents (personal property coverage); permanent fixtures and
+-    finishes are part of the building (dwelling coverage)."""
+-    lowered = (name or "").lower()
+-    if any(kw in lowered for kw in _CONTENTS_EXCEPTIONS):
+-        return "contents", None
+-    if any(kw in lowered for kw in _BUILDING_KEYWORDS):
+-        return "building", _BUILDING_NOTE
++    claim_class. Looks the name up in the taxonomy (whole-token, longest alias
++    wins; see taxonomy.py). Names the taxonomy does not know fall back to the
++    model's category: portable-goods categories are contents, anything else is
++    unclear and sends the user to their adjuster."""
++    resolved = resolve_claim_class(name)
++    if resolved is not None:
++        claim_class, note, _leaf_id = resolved
++        return claim_class, note
+     if category in {"furniture", "electronics", "decor", "clothing"}:
+         return "contents", None
+-    if category == "appliance":
+-        # Freestanding appliances are contents, built-ins are building; from
+-        # a name alone we usually cannot tell which. Dishwashers and ovens
+-        # are checked first because they are usually built in but the names
+-        # contain freestanding keywords ("washer").
+-        if any(kw in lowered for kw in ("dishwasher", "oven", "stove", "range", "cooktop")):
+-            return "unclear", _UNCLEAR_NOTE
+-        if any(kw in lowered for kw in ("fridge", "refrigerator", "washer", "dryer", "microwave", "toaster", "kettle", "blender", "air fryer", "vacuum")):
+-            return "contents", None
+-        return "unclear", _UNCLEAR_NOTE
+     return "unclear", _UNCLEAR_NOTE
+ 
+ 
+diff --git a/backend/app/services/taxonomy.py b/backend/app/services/taxonomy.py
+new file mode 100644
+index 0000000..5353567
+--- /dev/null
++++ b/backend/app/services/taxonomy.py
+@@ -0,0 +1,208 @@
++"""Item taxonomy v1 and name lookup (inventory.md s5).
++
++Source of truth is `app/data/taxonomy_v1.csv`, one row per leaf class, meant to
++be reviewed in a spreadsheet by an insurance professional. Columns:
++
++  id, name, group       identifiers
++  claim_class           contents | building | unclear
++  legacy_category       maps to the current Gemini category enum
++  bulk, high_value      0/1 flags
++  modifiers             1 if "built-in" / "freestanding" in the name can flip
++                        the leaf's claim class
++  aliases               pipe-separated phrases that map a free-text name here
++  lifespan_years        empty until written with an insurance professional
++  price_band_source     empty until pricing data is chosen
++  reviewed              0 until a professional signs the row off
++
++Matching is by whole tokens, not substrings, so "outdoor" does not hit "door",
++"hair trimmer" does not hit "trim", and "filing cabinet" resolves to the filing
++cabinet leaf instead of the generic "cabinet". The longest matching alias wins.
++Nothing here is legal or coverage advice; claim_class values reproduce the
++conventions the previous keyword list and prompt already used.
++"""
++
++from __future__ import annotations
++
++import csv
++import re
++from dataclasses import dataclass
++from functools import lru_cache
++from pathlib import Path
++from typing import Optional
++
++TAXONOMY_PATH = Path(__file__).resolve().parent.parent / "data" / "taxonomy_v1.csv"
++
++CLAIM_CLASSES = ("contents", "building", "unclear")
++
++BUILDING_NOTE = (
++    "Usually part of the building. Homeowners claim it under dwelling "
++    "coverage; renters should report it to their landlord."
++)
++UNCLEAR_NOTE = (
++    "Could be contents or part of the building. Ask your adjuster how to "
++    "claim it."
++)
++
++_TOKEN_RE = re.compile(r"[a-z0-9]+")
++
++
++def _singular(tok: str) -> str:
++    # Applied to aliases and names alike, so it only has to be consistent.
++    if len(tok) > 3 and tok.endswith("ies"):
++        return tok[:-3] + "y"
++    if len(tok) > 3 and tok.endswith("s") and not tok.endswith(("ss", "us", "is")):
++        return tok[:-1]
++    return tok
++
++
++def tokenize(text: str) -> tuple[str, ...]:
++    return tuple(_singular(t) for t in _TOKEN_RE.findall((text or "").lower()))
++
++
++# Phrases in an item name that say how it is installed. Compared as token runs.
++_BUILT_IN_MARKERS = tuple(
++    tokenize(p)
++    for p in ("built-in", "built in", "builtin", "wall mounted", "recessed", "integrated", "installed")
++)
++_FREESTANDING_MARKERS = tuple(
++    tokenize(p)
++    for p in ("freestanding", "free standing", "free-standing", "standalone", "portable", "countertop")
++)
++
++
++def _contains_run(tokens: tuple[str, ...], run: tuple[str, ...]) -> bool:
++    n = len(run)
++    return n > 0 and any(tokens[i : i + n] == run for i in range(len(tokens) - n + 1))
++
++
++@dataclass(frozen=True)
++class Leaf:
++    id: str
++    name: str
++    group: str
++    claim_class: str
++    legacy_category: str
++    bulk: bool
++    high_value: bool
++    modifiers: bool
++    lifespan_years: Optional[float]
++    price_band_source: str
++    reviewed: bool
++    aliases: tuple[str, ...]
++
++
++@dataclass(frozen=True)
++class Match:
++    leaf: Leaf
++    alias: str
++    score: tuple[int, int]  # (alias tokens, alias chars); higher wins
++
++
++@lru_cache(maxsize=1)
++def load_taxonomy(path: str = str(TAXONOMY_PATH)) -> tuple[Leaf, ...]:
++    leaves: list[Leaf] = []
++    seen: set[str] = set()
++    with open(path, newline="", encoding="utf-8") as fh:
++        for row in csv.DictReader(fh):
++            claim = row["claim_class"].strip()
++            if claim not in CLAIM_CLASSES:
++                raise ValueError(f"{row['id']}: bad claim_class {claim!r}")
++            if row["id"] in seen:
++                raise ValueError(f"duplicate taxonomy id {row['id']!r}")
++            seen.add(row["id"])
++            life = row.get("lifespan_years", "").strip()
++            leaves.append(
++                Leaf(
++                    id=row["id"].strip(),
++                    name=row["name"].strip(),
++                    group=row["group"].strip(),
++                    claim_class=claim,
++                    legacy_category=row["legacy_category"].strip(),
++                    bulk=row["bulk"].strip() == "1",
++                    high_value=row["high_value"].strip() == "1",
++                    modifiers=row["modifiers"].strip() == "1",
++                    lifespan_years=float(life) if life else None,
++                    price_band_source=row.get("price_band_source", "").strip(),
++                    reviewed=row.get("reviewed", "0").strip() == "1",
++                    aliases=tuple(a.strip() for a in row["aliases"].split("|") if a.strip()),
++                )
++            )
++    return tuple(leaves)
++
++
++@lru_cache(maxsize=1)
++def _alias_index() -> tuple[tuple[tuple[str, ...], str, int, Leaf], ...]:
++    """(alias tokens, alias text, leaf order, leaf), longest alias first."""
++    entries = []
++    for order, leaf in enumerate(load_taxonomy()):
++        for alias in leaf.aliases:
++            toks = tokenize(alias)
++            if toks:
++                entries.append((toks, alias, order, leaf))
++    entries.sort(key=lambda e: (-len(e[0]), -sum(len(t) for t in e[0]), e[2]))
++    return tuple(entries)
++
++
++def _find_run(tokens: tuple[str, ...], run: tuple[str, ...]) -> int:
++    """Index just past the last occurrence of run in tokens, or -1."""
++    n = len(run)
++    for i in range(len(tokens) - n, -1, -1):
++        if tokens[i : i + n] == run:
++            return i + n
++    return -1
++
++
++def match_name(name: str) -> Optional[Match]:
++    """Best taxonomy leaf for a free-text item name, or None.
++
++    Longest alias (in tokens) wins. Among equally long aliases, the one that
++    appears later in the name wins, because the head noun comes last in
++    English: "countertop microwave" is a microwave, not a countertop.
++    Remaining ties go to alias length in characters, then taxonomy order.
++    """
++    tokens = tokenize(name)
++    if not tokens:
++        return None
++    best = None
++    best_key = None
++    for toks, alias, order, leaf in _alias_index():
++        end = _find_run(tokens, toks)
++        if end < 0:
++            continue
++        chars = sum(len(t) for t in toks)
++        key = (len(toks), end, chars, -order)
++        if best_key is None or key > best_key:
++            best, best_key = Match(leaf, alias, (len(toks), chars)), key
++    return best
++
++
++def get_leaf(leaf_id: str) -> Optional[Leaf]:
++    return next((l for l in load_taxonomy() if l.id == leaf_id), None)
++
++
++def note_for(claim_class: str) -> Optional[str]:
++    if claim_class == "building":
++        return BUILDING_NOTE
++    if claim_class == "unclear":
++        return UNCLEAR_NOTE
++    return None
++
++
++def resolve_claim_class(name: str) -> Optional[tuple[str, Optional[str], str]]:
++    """(claim_class, note, leaf_id) from the taxonomy, or None if no leaf matches.
++
++    "built-in" or similar in the name turns a modifier-sensitive leaf into
++    building; "freestanding" or similar turns it into contents. A leaf that is
++    already building or contents without the modifier flag is never flipped.
++    """
++    m = match_name(name)
++    if m is None:
++        return None
++    claim = m.leaf.claim_class
++    if m.leaf.modifiers:
++        tokens = tokenize(name)
++        if any(_contains_run(tokens, r) for r in _BUILT_IN_MARKERS):
++            claim = "building"
++        elif any(_contains_run(tokens, r) for r in _FREESTANDING_MARKERS):
++            claim = "contents"
++    return claim, note_for(claim), m.leaf.id
+diff --git a/tests/test_taxonomy.py b/tests/test_taxonomy.py
+new file mode 100644
+index 0000000..14c16f9
+--- /dev/null
++++ b/tests/test_taxonomy.py
+@@ -0,0 +1,131 @@
++"""Tests for taxonomy v1 (data integrity) and the name lookup that backs
++classify_claim_class. Pure logic, no model calls."""
++
++import sys
++from collections import defaultdict
++from pathlib import Path
++
++import pytest
++
++BACKEND = Path(__file__).resolve().parent.parent / "backend"
++if str(BACKEND) not in sys.path:
++    sys.path.insert(0, str(BACKEND))
++
++pytest.importorskip("pydantic")
++
++from app.services.gemini_inventory import classify_claim_class  # noqa: E402
++from app.services.taxonomy import (  # noqa: E402
++    CLAIM_CLASSES,
++    get_leaf,
++    load_taxonomy,
++    match_name,
++    resolve_claim_class,
++    tokenize,
++)
++
++LEGACY_CATEGORIES = {"furniture", "appliance", "electronics", "decor", "clothing", "other"}
++
++
++class TestDataIntegrity:
++    def test_loads_and_is_nonempty(self):
++        assert len(load_taxonomy()) >= 100
++
++    def test_ids_unique_and_fields_valid(self):
++        ids = [l.id for l in load_taxonomy()]
++        assert len(ids) == len(set(ids))
++        for l in load_taxonomy():
++            assert l.claim_class in CLAIM_CLASSES, l.id
++            assert l.legacy_category in LEGACY_CATEGORIES, l.id
++            assert l.aliases, f"{l.id} has no aliases"
++
++    def test_no_alias_shared_between_leaves(self):
++        seen = defaultdict(set)
++        for l in load_taxonomy():
++            for a in l.aliases:
++                seen[tokenize(a)].add(l.id)
++        clashes = {k: v for k, v in seen.items() if len(v) > 1}
++        assert not clashes
++
++    def test_every_alias_resolves_to_its_own_leaf(self):
++        for l in load_taxonomy():
++            for a in l.aliases:
++                assert match_name(a).leaf.id == l.id, (l.id, a)
++
++    def test_nothing_marked_reviewed_yet(self):
++        # Flip this when a professional signs rows off; until then the data
++        # must not claim a review that has not happened.
++        assert not any(l.reviewed for l in load_taxonomy())
++
++    def test_pending_professional_fields_left_empty(self):
++        assert all(l.lifespan_years is None for l in load_taxonomy())
++
++
++class TestTokenMatching:
++    @pytest.mark.parametrize(
++        "name, expected_leaf",
++        [
++            ("outdoor chair", "patio_set"),  # "door" inside "outdoor" must not match
++            ("filing cabinet", "filing_cabinet"),  # not generic cabinet
++            ("kitchen cabinets", "built_in_cabinets"),
++            ("range hood", "range_hood"),  # longer alias beats "range"
++            ("dishwasher", "dishwasher"),  # not "washer"
++            ("door mat", "area_rug"),  # not "door"
++            ("persian carpet", "area_rug"),  # not wall-to-wall carpet
++            ("microwave oven", "microwave"),  # not generic oven
++        ],
++    )
++    def test_longest_whole_token_wins(self, name, expected_leaf):
++        assert match_name(name).leaf.id == expected_leaf
++
++    def test_hair_trimmer_is_not_trim(self):
++        assert match_name("hair trimmer") is None
++
++    def test_plural_and_case_insensitive(self):
++        assert match_name("Wooden DINING CHAIRS").leaf.id == "chair"
++
++    def test_empty_and_none(self):
++        assert match_name("") is None
++        assert match_name(None) is None
++
++
++class TestClaimClass:
++    @pytest.mark.parametrize(
++        "name, category, expected",
++        [
++            ("outdoor chair", "furniture", "contents"),
++            ("filing cabinet", "furniture", "contents"),
++            ("kitchen cabinets", "other", "building"),
++            ("hair trimmer", "appliance", "unclear"),
++            ("hair trimmer", "electronics", "contents"),
++            ("built-in dishwasher", "appliance", "building"),
++            ("dishwasher", "appliance", "unclear"),
++            ("freestanding oven", "appliance", "contents"),
++            ("wall oven", "appliance", "building"),
++            ("countertop microwave", "appliance", "contents"),
++            ("built in refrigerator", "appliance", "building"),
++            ("stainless steel refrigerator", "appliance", "contents"),
++            ("cabinet", "furniture", "unclear"),
++            ("built-in cabinet", "furniture", "building"),
++            ("front door", "other", "building"),
++            ("shower curtain", "other", "contents"),
++            ("shed", "other", "unclear"),
++        ],
++    )
++    def test_cases(self, name, category, expected):
++        assert classify_claim_class(name, category)[0] == expected
++
++    def test_modifier_does_not_flip_building_leaf(self):
++        assert resolve_claim_class("freestanding bathtub")[0] == "building"
++
++    def test_notes_match_class(self):
++        assert "building" in classify_claim_class("wallpaper", "other")[1].lower()
++        assert "adjuster" in classify_claim_class("dishwasher", "appliance")[1].lower()
++        assert classify_claim_class("sofa", "furniture")[1] is None
++
++    def test_resolve_returns_leaf_id(self):
++        assert resolve_claim_class("leather sofa")[2] == "sofa"
++        assert get_leaf("sofa").group == "Seating"
++
++    def test_unknown_item_falls_back_to_category(self):
++        assert classify_claim_class("mystery gadget", "other")[0] == "unclear"
++        assert classify_claim_class("mystery gadget", "electronics")[0] == "contents"
+-- 
+2.43.0
+

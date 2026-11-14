@@ -1,0 +1,597 @@
+From caa9bff8da13a5982dbae78ad2c39cc1d09f72fb Mon Sep 17 00:00:00 2001
+From: Claude <claude@example.com>
+Date: Fri, 23 Oct 2026 02:04:08 +0000
+Subject: [PATCH 3/3] inventory: migration 0012 evidence columns, item field
+ validation, items routes use it
+
+- 0012_inventory_extras.sql: price_low/high/basis/date, comparables, field_confidence, taxonomy_id, claim_class, bulk, damage_types, evidence, source; check constraints; idempotent
+- services/item_fields.py: pure validation (ranges, enums, taxonomy id exists, comparables/evidence shape, drops unknown keys)
+- blueprints/items.py: create, bulk, patch all go through clean_item_row (400 with a clear message)
+- tests: 42 cases incl. migration/code drift check
+- CLAUDE.md: notes for the three pieces
+---
+ CLAUDE.md                                     |   5 +
+ backend/app/blueprints/items.py               |  40 ++--
+ backend/app/services/item_fields.py           | 202 ++++++++++++++++++
+ .../migrations/0012_inventory_extras.sql      |  65 ++++++
+ tests/test_item_fields.py                     | 178 +++++++++++++++
+ 5 files changed, 468 insertions(+), 22 deletions(-)
+ create mode 100644 backend/app/services/item_fields.py
+ create mode 100644 backend/supabase/migrations/0012_inventory_extras.sql
+ create mode 100644 tests/test_item_fields.py
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 01f7b3b..ee82e8e 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -25,6 +25,11 @@ Disaster-recovery web app for Alberta (AI4Good Lab project). A user creates a ca
+ - `legal.md`: design spec for replacing Gemini in document analysis (deadline engine, coverage composer, plain-language tiers, annotation, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_documents`, `document_pipeline`, `signals`, or `pdf_and_summary/`.
+ - `inventory.md`: design spec for replacing Gemini in the photo inventory (taxonomy, detector, damage, salvage, pricing by comparables, pretrained models, data sources, CVAT and Label Studio workflow, evaluation, rollout). Design only, nothing implemented. Read it before changing `gemini_inventory`, `blueprints/ml.py`, `blueprints/items.py`, `Inventory.tsx`, or `ml/`.
+ 
++## Inventory foundations (inventory.md s15, s5, s2)
++- `ml/classifier/splits.py` makes group-aware train/val/test splits (synthetic copies stay with their original; val/test real only) and writes `split_manifest.json`; `train.py` evaluates test once. Label fixes go in a `--overrides` CSV (`audit.py` produces review CSVs).
++- `backend/app/data/taxonomy_v1.csv` + `services/taxonomy.py`: leaf classes and whole-token lookup; `classify_claim_class` delegates to it. Lifespan, price source, and `reviewed` are blank until an insurance professional fills them.
++- Migration `0012_inventory_extras.sql` adds price range, basis, comparables, per-field confidence, taxonomy id, claim class, bulk, damage types, evidence, source to `case_items`. Validation: `services/item_fields.py`. Apply 0012 before any client sends these fields.
++
+ ## Conventions
+ - Warm, calm product voice; avoid dashes in user-facing copy. Contrast must stay WCAG AA (tokens in `styles.css`).
+ - Forms use `components/forms/Field`, `PasswordChecklist`, `MissingList`: required marker, inline validation on blur, counters, disabled submit with a visible "what's left" list.
+diff --git a/backend/app/blueprints/items.py b/backend/app/blueprints/items.py
+index 8acacc3..6848d80 100644
+--- a/backend/app/blueprints/items.py
++++ b/backend/app/blueprints/items.py
+@@ -22,6 +22,7 @@ from flask import Blueprint, g, jsonify, request
+ from ..auth import require_auth
+ from ..extensions import service_client, user_client
+ from ..pagination import parse_pagination
++from ..services.item_fields import WRITABLE, clean_item_row  # noqa: F401 (WRITABLE re-exported)
+ 
+ bp = Blueprint("items", __name__)
+ 
+@@ -43,23 +44,8 @@ case_bp = Blueprint("case_items", __name__, url_prefix="/cases/<case_id>/items")
+ # User library
+ lib_bp = Blueprint("user_items", __name__, url_prefix="/items")
+ 
+-WRITABLE = {
+-    "name",
+-    "category",
+-    "material",
+-    "estimated_value",
+-    "damage_type",
+-    "damage_severity",
+-    "confidence",
+-    "image_url",
+-    "before_url",
+-    "after_url",
+-    "receipts",
+-    "description",
+-    "room",
+-    "purchase_date",
+-    "case_id",
+-}
++# WRITABLE and the validation for the evidence fields (migration 0012) live in
++# services/item_fields.py so the rules can be unit-tested without Flask.
+ 
+ 
+ def _insert_item(sb, row):
+@@ -99,7 +85,9 @@ def create_item_for_case(case_id: str):
+     data = request.get_json(silent=True) or {}
+     if not data.get("name"):
+         return jsonify({"error": "name is required"}), 400
+-    row = {k: v for k, v in data.items() if k in WRITABLE}
++    row, problem = clean_item_row(data)
++    if problem:
++        return jsonify({"error": problem}), 400
+     row["case_id"] = case_id
+     row["user_id"] = g.user_id
+     sb = user_client(g.access_token)
+@@ -127,7 +115,9 @@ def create_items_bulk(case_id: str):
+     for it in items:
+         if not isinstance(it, dict) or not it.get("name"):
+             return jsonify({"error": "each item needs a name"}), 400
+-        row = {k: v for k, v in it.items() if k in WRITABLE}
++        row, problem = clean_item_row(it)
++        if problem:
++            return jsonify({"error": f"item {len(rows) + 1}: {problem}"}), 400
+         row["case_id"] = case_id
+         row["user_id"] = g.user_id
+         rows.append(row)
+@@ -144,7 +134,9 @@ def create_items_bulk(case_id: str):
+ @require_auth
+ def update_item_for_case(case_id: str, item_id: str):
+     data = request.get_json(silent=True) or {}
+-    row = {k: v for k, v in data.items() if k in WRITABLE}
++    row, problem = clean_item_row(data)
++    if problem:
++        return jsonify({"error": problem}), 400
+     if not row:
+         return jsonify({"error": "no updatable fields provided"}), 400
+     sb = user_client(g.access_token)
+@@ -223,7 +215,9 @@ def create_library_item():
+     data = request.get_json(silent=True) or {}
+     if not data.get("name"):
+         return jsonify({"error": "name is required"}), 400
+-    row = {k: v for k, v in data.items() if k in WRITABLE}
++    row, problem = clean_item_row(data)
++    if problem:
++        return jsonify({"error": problem}), 400
+     row["user_id"] = g.user_id
+     # If the caller didn't pass case_id, the item lives in the library only.
+     sb = user_client(g.access_token)
+@@ -284,7 +278,9 @@ def upload_item_image():
+ @require_auth
+ def update_library_item(item_id: str):
+     data = request.get_json(silent=True) or {}
+-    row = {k: v for k, v in data.items() if k in WRITABLE}
++    row, problem = clean_item_row(data)
++    if problem:
++        return jsonify({"error": problem}), 400
+     if not row:
+         return jsonify({"error": "no updatable fields provided"}), 400
+     sb = user_client(g.access_token)
+diff --git a/backend/app/services/item_fields.py b/backend/app/services/item_fields.py
+new file mode 100644
+index 0000000..06e80be
+--- /dev/null
++++ b/backend/app/services/item_fields.py
+@@ -0,0 +1,202 @@
++"""Validation for the inventory evidence fields added in migration 0012.
++
++Pure functions, no Flask or Supabase, so the rules are unit-testable. The items
++blueprint calls `clean_item_row` on every create and update: it keeps only
++writable keys and rejects malformed evidence fields with a message the client
++can show, instead of letting a bad value reach a database constraint.
++
++None is always accepted for the new fields (it clears them on PATCH).
++"""
++
++from __future__ import annotations
++
++import datetime as _dt
++from typing import Any, Optional
++
++from .taxonomy import CLAIM_CLASSES, get_leaf
++
++PRICE_BASES = ("replacement", "acv")
++
++# inventory.md s7. Multi-label; "none" stands alone.
++DAMAGE_TYPES = (
++    "smoke", "soot", "char", "heat_warping", "water_stain", "standing_water",
++    "flood_mud", "mold", "impact_dent", "wind_debris", "freeze_burst", "none",
++)
++
++BASE_FIELDS = frozenset({
++    "name", "category", "material", "estimated_value", "damage_type",
++    "damage_severity", "confidence", "image_url", "before_url", "after_url",
++    "receipts", "description", "room", "purchase_date", "case_id",
++})
++
++EXTRA_FIELDS = frozenset({
++    "price_low", "price_high", "price_basis", "price_date", "comparables",
++    "field_confidence", "taxonomy_id", "claim_class", "bulk", "damage_types",
++    "evidence", "source",
++})
++
++WRITABLE = BASE_FIELDS | EXTRA_FIELDS
++
++_MAX_PRICE = 10_000_000
++_MAX_COMPARABLES = 10
++_COMPARABLE_KEYS = ("name", "source", "price", "currency", "date", "url")
++_EVIDENCE_KEYS = ("photo_url", "photo_index", "bounding_box")
++_BOX_KEYS = ("x1", "y1", "x2", "y2")
++
++
++def _is_num(v: Any) -> bool:
++    return isinstance(v, (int, float)) and not isinstance(v, bool)
++
++
++def _is_iso_date(v: Any) -> bool:
++    if not isinstance(v, str):
++        return False
++    try:
++        _dt.date.fromisoformat(v)
++        return True
++    except ValueError:
++        return False
++
++
++def _price(field: str, v: Any) -> Optional[str]:
++    if not _is_num(v) or v < 0 or v > _MAX_PRICE:
++        return f"{field} must be a number between 0 and {_MAX_PRICE}"
++    return None
++
++
++def _comparables(v: Any) -> tuple[Any, Optional[str]]:
++    if not isinstance(v, list):
++        return None, "comparables must be a list"
++    if len(v) > _MAX_COMPARABLES:
++        return None, f"comparables can hold at most {_MAX_COMPARABLES} entries"
++    cleaned = []
++    for c in v:
++        if not isinstance(c, dict):
++            return None, "each comparable must be an object"
++        name = c.get("name")
++        if not isinstance(name, str) or not name.strip() or len(name) > 200:
++            return None, "each comparable needs a name (200 characters or fewer)"
++        out: dict[str, Any] = {"name": name.strip()}
++        if "price" in c and c["price"] is not None:
++            err = _price("comparable price", c["price"])
++            if err:
++                return None, err
++            out["price"] = c["price"]
++        for key, limit in (("source", 100), ("currency", 3), ("url", 500)):
++            val = c.get(key)
++            if val is None:
++                continue
++            if not isinstance(val, str) or len(val) > limit:
++                return None, f"comparable {key} must be text of {limit} characters or fewer"
++            if key == "url" and not val.startswith(("http://", "https://")):
++                return None, "comparable url must start with http:// or https://"
++            out[key] = val
++        if c.get("date") is not None:
++            if not _is_iso_date(c["date"]):
++                return None, "comparable date must be YYYY-MM-DD"
++            out["date"] = c["date"]
++        cleaned.append(out)
++    return cleaned, None
++
++
++def _field_confidence(v: Any) -> Optional[str]:
++    if not isinstance(v, dict) or len(v) > 16:
++        return "field_confidence must be an object with at most 16 fields"
++    for k, val in v.items():
++        if not isinstance(k, str) or not k or len(k) > 32:
++            return "field_confidence keys must be short text"
++        if not _is_num(val) or not 0 <= val <= 1:
++            return f"field_confidence[{k!r}] must be a number between 0 and 1"
++    return None
++
++
++def _evidence(v: Any) -> tuple[Any, Optional[str]]:
++    if not isinstance(v, dict):
++        return None, "evidence must be an object"
++    out: dict[str, Any] = {}
++    for key in _EVIDENCE_KEYS:
++        if key not in v or v[key] is None:
++            continue
++        val = v[key]
++        if key == "photo_url":
++            if not isinstance(val, str) or len(val) > 1000:
++                return None, "evidence.photo_url must be text of 1000 characters or fewer"
++        elif key == "photo_index":
++            if not isinstance(val, int) or isinstance(val, bool) or not 0 <= val < 1000:
++                return None, "evidence.photo_index must be a whole number"
++        elif key == "bounding_box":
++            if not isinstance(val, dict) or set(val) != set(_BOX_KEYS):
++                return None, "evidence.bounding_box needs x1, y1, x2, y2"
++            if not all(_is_num(val[k]) and 0 <= val[k] <= 1 for k in _BOX_KEYS):
++                return None, "evidence.bounding_box values must be between 0 and 1"
++            if val["x1"] >= val["x2"] or val["y1"] >= val["y2"]:
++                return None, "evidence.bounding_box must have x1 < x2 and y1 < y2"
++        out[key] = val
++    return out, None
++
++
++def clean_item_row(data: dict) -> tuple[dict, Optional[str]]:
++    """Keep writable keys and validate the evidence fields.
++
++    Returns (row, None) on success or ({}, message) on the first problem.
++    """
++    row = {k: v for k, v in data.items() if k in WRITABLE}
++
++    for f in ("price_low", "price_high"):
++        if row.get(f) is not None:
++            err = _price(f, row[f])
++            if err:
++                return {}, err
++    low, high = row.get("price_low"), row.get("price_high")
++    if low is not None and high is not None and low > high:
++        return {}, "price_low cannot be greater than price_high"
++
++    if row.get("price_basis") is not None and row["price_basis"] not in PRICE_BASES:
++        return {}, "price_basis must be 'replacement' or 'acv'"
++
++    if row.get("price_date") is not None and not _is_iso_date(row["price_date"]):
++        return {}, "price_date must be YYYY-MM-DD"
++
++    if row.get("claim_class") is not None and row["claim_class"] not in CLAIM_CLASSES:
++        return {}, "claim_class must be contents, building, or unclear"
++
++    if "bulk" in row and row["bulk"] is not None and not isinstance(row["bulk"], bool):
++        return {}, "bulk must be true or false"
++    if "bulk" in row and row["bulk"] is None:
++        del row["bulk"]  # column is NOT NULL; null means "leave it alone"
++
++    tid = row.get("taxonomy_id")
++    if tid is not None and (not isinstance(tid, str) or get_leaf(tid) is None):
++        return {}, "taxonomy_id is not a known taxonomy class"
++
++    dt = row.get("damage_types")
++    if dt is not None:
++        if not isinstance(dt, list) or len(dt) > len(DAMAGE_TYPES):
++            return {}, "damage_types must be a list"
++        bad = [d for d in dt if d not in DAMAGE_TYPES]
++        if bad:
++            return {}, f"unknown damage type: {bad[0]!r}"
++        if "none" in dt and len(dt) > 1:
++            return {}, "damage_types 'none' cannot be combined with other types"
++        row["damage_types"] = sorted(set(dt))
++
++    if row.get("comparables") is not None:
++        row["comparables"], err = _comparables(row["comparables"])
++        if err:
++            return {}, err
++
++    if row.get("field_confidence") is not None:
++        err = _field_confidence(row["field_confidence"])
++        if err:
++            return {}, err
++
++    if row.get("evidence") is not None:
++        row["evidence"], err = _evidence(row["evidence"])
++        if err:
++            return {}, err
++
++    src = row.get("source")
++    if src is not None and (not isinstance(src, str) or not src.strip() or len(src) > 100):
++        return {}, "source must be text of 100 characters or fewer"
++
++    return row, None
+diff --git a/backend/supabase/migrations/0012_inventory_extras.sql b/backend/supabase/migrations/0012_inventory_extras.sql
+new file mode 100644
+index 0000000..403fb61
+--- /dev/null
++++ b/backend/supabase/migrations/0012_inventory_extras.sql
+@@ -0,0 +1,65 @@
++-- Inventory evidence columns (inventory.md s2, s3).
++--
++-- case_items held one number (estimated_value) and no record of where it came
++-- from. The photo inventory redesign needs a home for:
++--   - a price range with its basis (replacement cost vs actual cash value),
++--     date, and the comparable products behind it
++--   - per-field confidence, so low-confidence fields can be flagged for review
++--   - the taxonomy class, contents/building claim class, and bulk flag
++--   - the damage vocabulary (multi-label) and where in which photo the item
++--     was seen
++--   - which component produced the row (model and version, rule id, or user)
++--
++-- estimated_value stays as the single headline number (the "mid" value, and
++-- the replacement cost when price_basis is 'replacement'), so the existing
++-- recommender, exports, and Inventory page keep working unchanged. Every new
++-- column is nullable or defaulted; old rows and old clients are unaffected.
++--
++-- Row-level security is table-wide, so these columns inherit it.
++
++alter table public.case_items
++    add column if not exists price_low      numeric(12, 2),
++    add column if not exists price_high     numeric(12, 2),
++    add column if not exists price_basis    text,
++    add column if not exists price_date     date,
++    add column if not exists comparables    jsonb,
++    add column if not exists field_confidence jsonb,
++    add column if not exists taxonomy_id    text,
++    add column if not exists claim_class    text,
++    add column if not exists bulk           boolean not null default false,
++    add column if not exists damage_types   text[],
++    add column if not exists evidence       jsonb,
++    add column if not exists source         text;
++
++-- Constraints are dropped first so this file can be re-run.
++alter table public.case_items drop constraint if exists case_items_price_range_ck;
++alter table public.case_items add constraint case_items_price_range_ck
++    check (
++        (price_low is null or price_low >= 0)
++        and (price_high is null or price_high >= 0)
++        and (price_low is null or price_high is null or price_low <= price_high)
++    );
++
++alter table public.case_items drop constraint if exists case_items_price_basis_ck;
++alter table public.case_items add constraint case_items_price_basis_ck
++    check (price_basis is null or price_basis in ('replacement', 'acv'));
++
++alter table public.case_items drop constraint if exists case_items_claim_class_ck;
++alter table public.case_items add constraint case_items_claim_class_ck
++    check (claim_class is null or claim_class in ('contents', 'building', 'unclear'));
++
++alter table public.case_items drop constraint if exists case_items_comparables_ck;
++alter table public.case_items add constraint case_items_comparables_ck
++    check (comparables is null or jsonb_typeof(comparables) = 'array');
++
++alter table public.case_items drop constraint if exists case_items_field_confidence_ck;
++alter table public.case_items add constraint case_items_field_confidence_ck
++    check (field_confidence is null or jsonb_typeof(field_confidence) = 'object');
++
++alter table public.case_items drop constraint if exists case_items_evidence_ck;
++alter table public.case_items add constraint case_items_evidence_ck
++    check (evidence is null or jsonb_typeof(evidence) = 'object');
++
++-- Lookups the app is likely to need: totals by claim class, bulk-entry flags.
++create index if not exists case_items_claim_class_idx
++    on public.case_items(user_id, claim_class);
+diff --git a/tests/test_item_fields.py b/tests/test_item_fields.py
+new file mode 100644
+index 0000000..3509531
+--- /dev/null
++++ b/tests/test_item_fields.py
+@@ -0,0 +1,178 @@
++"""Tests for validation of the inventory evidence fields (migration 0012)."""
++
++import sys
++from pathlib import Path
++
++import pytest
++
++BACKEND = Path(__file__).resolve().parent.parent / "backend"
++if str(BACKEND) not in sys.path:
++    sys.path.insert(0, str(BACKEND))
++
++pytest.importorskip("pydantic")
++
++from app.services.item_fields import (  # noqa: E402
++    BASE_FIELDS,
++    DAMAGE_TYPES,
++    EXTRA_FIELDS,
++    WRITABLE,
++    clean_item_row,
++)
++
++MIGRATION = BACKEND / "supabase" / "migrations" / "0012_inventory_extras.sql"
++
++
++def ok(data):
++    row, problem = clean_item_row(data)
++    assert problem is None, problem
++    return row
++
++
++def bad(data, fragment):
++    row, problem = clean_item_row(data)
++    assert row == {}
++    assert problem and fragment in problem
++
++
++class TestPassthrough:
++    def test_unknown_keys_dropped(self):
++        row = ok({"name": "sofa", "user_id": "x", "id": "y", "evil": 1})
++        assert row == {"name": "sofa"}
++
++    def test_old_payload_unchanged(self):
++        payload = {"name": "sofa", "category": "furniture", "estimated_value": 450,
++                   "confidence": 0.8, "room": "living_room"}
++        assert ok(payload) == payload
++
++    def test_writable_is_union(self):
++        assert WRITABLE == BASE_FIELDS | EXTRA_FIELDS
++        assert not BASE_FIELDS & EXTRA_FIELDS
++
++
++class TestPrice:
++    def test_range_ok(self):
++        row = ok({"name": "tv", "price_low": 300, "price_high": 500.5,
++                  "price_basis": "acv", "price_date": "2026-10-21"})
++        assert row["price_low"] == 300
++
++    @pytest.mark.parametrize("field", ["price_low", "price_high"])
++    @pytest.mark.parametrize("value", [-1, "12", True, 10**9])
++    def test_bad_price(self, field, value):
++        bad({"name": "x", field: value}, field)
++
++    def test_low_above_high(self):
++        bad({"name": "x", "price_low": 9, "price_high": 3}, "cannot be greater")
++
++    def test_single_bound_allowed(self):
++        ok({"name": "x", "price_high": 3})
++
++    def test_basis_and_date(self):
++        bad({"name": "x", "price_basis": "market"}, "price_basis")
++        bad({"name": "x", "price_date": "21/10/2026"}, "price_date")
++
++    def test_none_clears(self):
++        row = ok({"name": "x", "price_low": None, "price_basis": None})
++        assert row["price_low"] is None
++
++
++class TestClassFields:
++    def test_claim_class(self):
++        ok({"name": "x", "claim_class": "building"})
++        bad({"name": "x", "claim_class": "maybe"}, "claim_class")
++
++    def test_taxonomy_id_must_exist(self):
++        ok({"name": "x", "taxonomy_id": "sofa"})
++        bad({"name": "x", "taxonomy_id": "flying_carpet"}, "taxonomy_id")
++        bad({"name": "x", "taxonomy_id": 5}, "taxonomy_id")
++
++    def test_bulk(self):
++        assert ok({"name": "x", "bulk": True})["bulk"] is True
++        bad({"name": "x", "bulk": "yes"}, "bulk")
++
++    def test_bulk_null_is_ignored_not_cleared(self):
++        assert "bulk" not in ok({"name": "x", "bulk": None})
++
++    def test_damage_types_sorted_and_deduped(self):
++        row = ok({"name": "x", "damage_types": ["soot", "smoke", "soot"]})
++        assert row["damage_types"] == ["smoke", "soot"]
++
++    def test_damage_types_rules(self):
++        bad({"name": "x", "damage_types": ["lava"]}, "unknown damage type")
++        bad({"name": "x", "damage_types": ["none", "smoke"]}, "none")
++        bad({"name": "x", "damage_types": "smoke"}, "list")
++        assert "none" in DAMAGE_TYPES
++
++
++class TestComparables:
++    GOOD = {"name": "IKEA Kivik sofa", "source": "ikea.ca", "price": 899,
++            "currency": "CAD", "date": "2026-10-01", "url": "https://example.com/p"}
++
++    def test_good(self):
++        assert ok({"name": "x", "comparables": [self.GOOD]})["comparables"] == [self.GOOD]
++
++    def test_unknown_keys_dropped(self):
++        row = ok({"name": "x", "comparables": [{**self.GOOD, "secret": 1}]})
++        assert "secret" not in row["comparables"][0]
++
++    @pytest.mark.parametrize(
++        "comp, fragment",
++        [
++            ({"price": 5}, "name"),
++            ({"name": "a", "price": -5}, "price"),
++            ({"name": "a", "date": "yesterday"}, "date"),
++            ({"name": "a", "url": "javascript:alert(1)"}, "url"),
++            ({"name": "a", "currency": "CADX"}, "currency"),
++            ("not a dict", "object"),
++        ],
++    )
++    def test_bad(self, comp, fragment):
++        bad({"name": "x", "comparables": [comp]}, fragment)
++
++    def test_too_many_and_not_list(self):
++        bad({"name": "x", "comparables": [self.GOOD] * 11}, "at most")
++        bad({"name": "x", "comparables": {"a": 1}}, "list")
++
++
++class TestConfidenceEvidenceSource:
++    def test_field_confidence(self):
++        ok({"name": "x", "field_confidence": {"class": 0.9, "price": 0.4}})
++        bad({"name": "x", "field_confidence": {"class": 1.2}}, "between 0 and 1")
++        bad({"name": "x", "field_confidence": {"class": "high"}}, "between 0 and 1")
++        bad({"name": "x", "field_confidence": [0.5]}, "object")
++
++    def test_evidence_ok_and_filtered(self):
++        row = ok({"name": "x", "evidence": {
++            "photo_url": "https://e/x.jpg", "photo_index": 2,
++            "bounding_box": {"x1": 0.1, "y1": 0.1, "x2": 0.5, "y2": 0.9}, "junk": 1}})
++        assert "junk" not in row["evidence"]
++
++    @pytest.mark.parametrize(
++        "ev",
++        [
++            {"bounding_box": {"x1": 0.5, "y1": 0.1, "x2": 0.2, "y2": 0.9}},
++            {"bounding_box": {"x1": 0, "y1": 0, "x2": 2, "y2": 1}},
++            {"bounding_box": {"x1": 0, "y1": 0}},
++            {"photo_index": -1},
++            {"photo_index": True},
++            "box",
++        ],
++    )
++    def test_evidence_bad(self, ev):
++        bad({"name": "x", "evidence": ev}, "evidence")
++
++    def test_source(self):
++        ok({"name": "x", "source": "gemini-2.5-flash"})
++        bad({"name": "x", "source": "  "}, "source")
++        bad({"name": "x", "source": "a" * 101}, "source")
++
++
++class TestMigrationMatchesCode:
++    def test_every_extra_field_has_a_column(self):
++        sql = MIGRATION.read_text()
++        for f in EXTRA_FIELDS:
++            assert f"add column if not exists {f}" in sql, f
++
++    def test_migration_check_values_match_code(self):
++        sql = MIGRATION.read_text()
++        for v in ("replacement", "acv", "contents", "building", "unclear"):
++            assert f"'{v}'" in sql
+-- 
+2.43.0
+

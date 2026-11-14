@@ -1,22 +1,17 @@
-"""Label vocabulary and folder map for the damage classifier.
+"""
+Label vocabulary and folder map for the damage classifier. No torch import, so
+the splitting and audit tools can use it on a machine without a GPU stack.
 
-Kept free of torch so the split tooling and tests can import it anywhere.
-
-Expected directory layout (relative to dataset_root):
-    chair_intact/                        -> intact
-    chair_intact_synthetic/              -> intact
-    chair_damaged/damaged/               -> destroyed
-    chair_damaged/damaged_synthetic/     -> destroyed
-    chair_damaged/salvageable/           -> salvageable
-    chair_damaged/salvageable_synthetic/ -> salvageable
-    table_intact/                        -> intact (audit pending, see audit.py)
-    table_damaged/...                    -> same pattern as chair_damaged
+These are the old 3-class labels, kept as a starting point. The target
+vocabulary in inventory.md section 7 is multi-label damage plus ordinal
+severity.
 """
 
 LABEL2ID = {"intact": 0, "salvageable": 1, "destroyed": 2}
 ID2LABEL = {v: k for k, v in LABEL2ID.items()}
 
-# Maps each subfolder (relative to dataset_root) to its class label.
+# Maps each subfolder path (relative to dataset_root) to its class label.
+# Adjust or extend this if more item types are added.
 FOLDER_LABEL_MAP = {
     "chair_intact": "intact",
     "chair_intact_synthetic": "intact",
@@ -24,13 +19,11 @@ FOLDER_LABEL_MAP = {
     "chair_damaged/damaged_synthetic": "destroyed",
     "chair_damaged/salvageable": "salvageable",
     "chair_damaged/salvageable_synthetic": "salvageable",
-    # Audit pending: run `python -m classifier.audit table-intact`, review the
-    # CSV by hand, and record fixes in label_overrides.csv (see splits.py).
+    # TODO: audit table_intact — a few filenames suggest misplaced damaged images
+    # (python -m classifier.audit --dataset <root> lists the suspects)
     "table_intact": "intact",
     "table_damaged/damaged": "destroyed",
     "table_damaged/damaged_synthetic": "destroyed",
     "table_damaged/salvageable": "salvageable",
     "table_damaged/salvageable_synthetic": "salvageable",
 }
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}

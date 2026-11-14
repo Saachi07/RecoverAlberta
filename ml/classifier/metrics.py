@@ -1,77 +1,92 @@
-"""Held-out evaluation metrics (numpy only): per-class precision and recall,
-confusion matrix, macro-F1, and expected calibration error."""
+"""
+Classification metrics for the damage classifier. numpy only, so it is testable
+without torch. Used by train.py (checkpoint choice on val) and evaluate.py
+(the one-time test report).
+"""
 
 from __future__ import annotations
 
 import numpy as np
 
-from .labels import ID2LABEL
-
 
 def confusion_matrix(y_true, y_pred, n_classes: int) -> np.ndarray:
+    """Rows are the true class, columns the predicted class."""
     cm = np.zeros((n_classes, n_classes), dtype=int)
     for t, p in zip(y_true, y_pred):
         cm[int(t), int(p)] += 1
     return cm
 
 
-def per_class_prf(cm: np.ndarray) -> list[dict]:
-    rows = []
-    for i in range(cm.shape[0]):
-        tp = int(cm[i, i])
-        fp = int(cm[:, i].sum() - tp)
-        fn = int(cm[i, :].sum() - tp)
-        p = tp / (tp + fp) if tp + fp else 0.0
-        r = tp / (tp + fn) if tp + fn else 0.0
-        f1 = 2 * p * r / (p + r) if p + r else 0.0
-        rows.append(
-            {
-                "class": ID2LABEL.get(i, str(i)),
-                "precision": round(p, 4),
-                "recall": round(r, 4),
-                "f1": round(f1, 4),
-                "support": int(cm[i, :].sum()),
-            }
-        )
-    return rows
+def per_class_report(cm: np.ndarray, names: list[str]) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for i, name in enumerate(names):
+        tp = cm[i, i]
+        predicted = cm[:, i].sum()
+        actual = cm[i, :].sum()
+        precision = tp / predicted if predicted else 0.0
+        recall = tp / actual if actual else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        out[name] = {
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "support": int(actual),
+        }
+    return out
+
+
+def macro_f1(cm: np.ndarray, names: list[str]) -> float:
+    rep = per_class_report(cm, names)
+    present = [v["f1"] for v in rep.values() if v["support"] > 0]
+    return float(np.mean(present)) if present else 0.0
+
+
+def accuracy(cm: np.ndarray) -> float:
+    total = cm.sum()
+    return float(np.trace(cm) / total) if total else 0.0
 
 
 def expected_calibration_error(probs: np.ndarray, y_true, n_bins: int = 10) -> float:
-    """Top-label ECE: weighted gap between confidence and accuracy per bin."""
+    """Expected calibration error on the top-1 prediction.
+
+    probs: (n, n_classes) softmax outputs. Lower is better; 0 means a model that
+    says 80 percent is right 80 percent of the time.
+    """
     probs = np.asarray(probs, dtype=float)
     y_true = np.asarray(y_true)
     if len(y_true) == 0:
         return 0.0
     conf = probs.max(axis=1)
-    correct = (probs.argmax(axis=1) == y_true).astype(float)
+    pred = probs.argmax(axis=1)
+    correct = (pred == y_true).astype(float)
+
     edges = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
     for lo, hi in zip(edges[:-1], edges[1:]):
-        mask = (conf > lo) & (conf <= hi)
+        # include 1.0 in the last bin
+        mask = (conf > lo) & (conf <= hi) if lo > 0 else (conf >= lo) & (conf <= hi)
         if mask.any():
             ece += mask.mean() * abs(correct[mask].mean() - conf[mask].mean())
     return float(ece)
 
 
-def macro_f1(y_true, y_pred, n_classes: int) -> float:
-    rows = per_class_prf(confusion_matrix(y_true, y_pred, n_classes))
-    return float(np.mean([r["f1"] for r in rows])) if rows else 0.0
+def format_confusion(cm: np.ndarray, names: list[str]) -> str:
+    width = max(len(n) for n in names + ["true \\ pred"]) + 2
+    header = "true \\ pred".ljust(width) + "".join(n.rjust(width) for n in names)
+    rows = [header]
+    for i, n in enumerate(names):
+        rows.append(n.ljust(width) + "".join(str(int(v)).rjust(width) for v in cm[i]))
+    return "\n".join(rows)
 
 
-def build_report(probs: np.ndarray, y_true) -> dict:
-    probs = np.asarray(probs, dtype=float)
-    y_true = np.asarray(y_true)
-    n_classes = probs.shape[1]
-    y_pred = probs.argmax(axis=1)
-    cm = confusion_matrix(y_true, y_pred, n_classes)
+def build_report(y_true, y_pred, probs, names: list[str]) -> dict:
+    cm = confusion_matrix(y_true, y_pred, len(names))
     return {
-        "n": int(len(y_true)),
-        "accuracy": round(float((y_pred == y_true).mean()), 4) if len(y_true) else 0.0,
-        "macro_f1": round(macro_f1(y_true, y_pred, n_classes), 4),
-        "per_class": per_class_prf(cm),
-        "confusion_matrix": {
-            "labels": [ID2LABEL.get(i, str(i)) for i in range(n_classes)],
-            "rows_are_true": cm.tolist(),
-        },
-        "ece": round(expected_calibration_error(probs, y_true), 4),
+        "n": int(cm.sum()),
+        "accuracy": accuracy(cm),
+        "macro_f1": macro_f1(cm, names),
+        "per_class": per_class_report(cm, names),
+        "confusion_matrix": cm.tolist(),
+        "class_order": names,
+        "ece": expected_calibration_error(probs, y_true),
     }
