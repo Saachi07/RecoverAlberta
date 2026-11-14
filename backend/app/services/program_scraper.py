@@ -227,7 +227,7 @@ def _extract_programs(page_text: str, case_ctx: dict, api_key: str) -> list[Scra
 
 def _program_to_resource(p: ScrapedProgram, source: dict, incident: Optional[date]) -> dict:
     # Deterministic id so re-scrapes update in place instead of duplicating.
-    digest = hashlib.sha1(f"{source['key']}|{p.title.lower().strip()}".encode()).hexdigest()[:12]
+    digest = hashlib.sha256(f"{source['key']}|{p.title.lower().strip()}".encode()).hexdigest()[:12]
     body = p.summary.replace("—", ",").strip()
     if p.application_deadline:
         body = f"{body} Applications are noted as due by {p.application_deadline}."
@@ -354,7 +354,7 @@ def _discover_sources(case_ctx: dict, api_key: str, *, limit: int = DISCOVERY_LI
         if url in seen:
             continue
         seen.add(url)
-        digest = hashlib.sha1(url.encode()).hexdigest()[:12]
+        digest = hashlib.sha256(url.encode()).hexdigest()[:12]
         sources.append({
             "key": f"discovered-{digest}",
             "url": url,
